@@ -1,0 +1,21 @@
+# Maven build output
+**/target/
+*.class
+
+# Node / Frontend build output
+**/node_modules/
+**/dist/
+.eslintcache
+
+# IDE settings
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln
+*.docstates
+
+# OS temporary files
+.DS_Store
+Thumbs.db
