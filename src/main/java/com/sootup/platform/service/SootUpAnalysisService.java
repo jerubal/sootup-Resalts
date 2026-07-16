@@ -42,14 +42,16 @@ public class SootUpAnalysisService {
     private static final Logger log = LoggerFactory.getLogger(SootUpAnalysisService.class);
     private final ConcurrentHashMap<String, CompletableFuture<?>> runningTasks = new ConcurrentHashMap<>();
 
-    // Sink catalog: loaded once from sinks.yaml at startup.
-    // Key = pattern string, Value = riskCategory label.
-    // NOTE: JobStore is in-memory (MVP). Jobs are lost on restart and cannot
-    //       survive multiple backend instances. Migrate to a persistent store
-    //       (e.g. PostgreSQL via Spring Data JPA) before production deployment.
+    // Taint catalogs
     private final Map<String, String> sinkCatalog = new LinkedHashMap<>();
+    private final Map<String, String> sourceCatalog = new LinkedHashMap<>();
 
     @PostConstruct
+    public void loadCatalogs() {
+        loadSinkCatalog();
+        loadSourceCatalog();
+    }
+
     public void loadSinkCatalog() {
         try (InputStream is = getClass().getClassLoader().getResourceAsStream("sinks.yaml")) {
             if (is == null) { log.warn("sinks.yaml not found on classpath — sink detection disabled."); return; }
@@ -73,9 +75,40 @@ public class SootUpAnalysisService {
         }
     }
 
+    public void loadSourceCatalog() {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream("sources.yaml")) {
+            if (is == null) { log.warn("sources.yaml not found on classpath — source detection disabled."); return; }
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
+                String line;
+                String currentPattern = null;
+                while ((line = br.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("- pattern:")) {
+                        currentPattern = line.substring("- pattern:".length()).trim().replaceAll("^\"|\"$", "");
+                    } else if (line.startsWith("sourceCategory:") && currentPattern != null) {
+                        String category = line.substring("sourceCategory:".length()).trim().replaceAll("^\"|\"$", "");
+                        sourceCatalog.put(currentPattern, category);
+                        currentPattern = null;
+                    }
+                }
+            }
+            log.info("Loaded {} source patterns from sources.yaml", sourceCatalog.size());
+        } catch (Exception e) {
+            log.error("Failed to load sources.yaml: {}", e.getMessage());
+        }
+    }
+
     /** Returns the riskCategory if the method signature matches a known sink, else null. */
     private String matchSink(String methodSig) {
         for (Map.Entry<String, String> entry : sinkCatalog.entrySet()) {
+            if (methodSig.contains(entry.getKey())) return entry.getValue();
+        }
+        return null;
+    }
+
+    /** Returns the sourceCategory if the method signature matches a known source, else null. */
+    private String matchSource(String methodSig) {
+        for (Map.Entry<String, String> entry : sourceCatalog.entrySet()) {
             if (methodSig.contains(entry.getKey())) return entry.getValue();
         }
         return null;
@@ -421,9 +454,97 @@ public class SootUpAnalysisService {
                 nodeData.put("riskCategory", riskCategory);
             }
 
+            // Server-side source detection
+            String srcCat = matchSource(sigStr);
+            if (srcCat != null) {
+                nodeData.put("sourceCategory", srcCat);
+            }
+
             nodes.add(new GraphResponse.Node(nodeData));
         }
 
         return new GraphResponse(nodes, edges);
+    }
+
+    /** Computes taint chains by traversing the call graph from identified sources to sinks. */
+    public List<com.sootup.platform.dto.TaintChain> computeTaintChains(AnalysisJob job) {
+        GraphResponse cg = job.getCallGraph();
+        if (cg == null) return Collections.emptyList();
+
+        List<GraphResponse.Node> nodes = cg.getNodes();
+        List<GraphResponse.Edge> edges = cg.getEdges();
+
+        // Build adjacency list for forward traversal
+        Map<String, List<String>> adj = new HashMap<>();
+        for (GraphResponse.Edge edge : edges) {
+            String src = String.valueOf(edge.getData().get("source"));
+            String tgt = String.valueOf(edge.getData().get("target"));
+            adj.computeIfAbsent(src, k -> new ArrayList<>()).add(tgt);
+        }
+
+        // Identify all source & sink nodes
+        Map<String, String> sources = new HashMap<>();
+        Map<String, String> sinks = new HashMap<>();
+
+        for (GraphResponse.Node node : nodes) {
+            String id = String.valueOf(node.getData().get("id"));
+            
+            String srcCat = matchSource(id);
+            if (srcCat != null) {
+                sources.put(id, srcCat);
+            }
+
+            String sinkRisk = matchSink(id);
+            if (sinkRisk != null) {
+                sinks.put(id, sinkRisk);
+            }
+        }
+
+        List<com.sootup.platform.dto.TaintChain> chains = new ArrayList<>();
+
+        // BFS path finding from every source to locate paths to any sink
+        for (Map.Entry<String, String> sourceEntry : sources.entrySet()) {
+            String startNode = sourceEntry.getKey();
+            String srcCategory = sourceEntry.getValue();
+
+            // Run BFS
+            Queue<String> queue = new LinkedList<>();
+            Map<String, String> parent = new HashMap<>();
+            Set<String> visited = new HashSet<>();
+
+            queue.add(startNode);
+            visited.add(startNode);
+
+            while (!queue.isEmpty()) {
+                String current = queue.poll();
+
+                // If current node is a sink, build the path and record the taint chain
+                if (sinks.containsKey(current) && !current.equals(startNode)) {
+                    List<String> path = new ArrayList<>();
+                    String curr = current;
+                    while (curr != null) {
+                        path.add(curr);
+                        curr = parent.get(curr);
+                    }
+                    Collections.reverse(path);
+                    
+                    chains.add(new com.sootup.platform.dto.TaintChain(
+                        startNode, srcCategory,
+                        current, sinks.get(current),
+                        path
+                    ));
+                }
+
+                List<String> neighbors = adj.getOrDefault(current, Collections.emptyList());
+                for (String neighbor : neighbors) {
+                    if (visited.add(neighbor)) {
+                        parent.put(neighbor, current);
+                        queue.add(neighbor);
+                    }
+                }
+            }
+        }
+
+        return chains;
     }
 }

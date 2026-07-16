@@ -81,5 +81,13 @@ export const api = {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json(); // returns string[] — ordered list of method IDs on the path
   },
+
+  // Get computed taint chains (source -> sink paths) (FR-3c)
+  getTaintChains: async (jobId) => {
+    const res = await fetch(`${BASE}/${jobId}/taint`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
 };
+
 

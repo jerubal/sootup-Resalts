@@ -2,6 +2,7 @@ package com.sootup.platform.model;
 
 import com.sootup.platform.dto.AnalysisRequest;
 import com.sootup.platform.dto.GraphResponse;
+import com.sootup.platform.dto.TaintChain;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +28,8 @@ public class AnalysisJob {
     private GraphResponse callGraph;
     private int methodCount;
     private int edgeCount;
+    // Taint analysis results (populated lazily on first /taint request)
+    private List<TaintChain> taintChains = null;
 
     public AnalysisJob(String jobId, AnalysisRequest request) {
         this.jobId = jobId;
@@ -120,5 +123,13 @@ public class AnalysisJob {
 
     public void setEdgeCount(int edgeCount) {
         this.edgeCount = edgeCount;
+    }
+
+    public List<TaintChain> getTaintChains() {
+        return taintChains;
+    }
+
+    public void setTaintChains(List<TaintChain> taintChains) {
+        this.taintChains = taintChains;
     }
 }

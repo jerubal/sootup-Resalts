@@ -1,0 +1,63 @@
+# Taint source catalog — configurable without code changes.
+# Sources are entry points where untrusted/user-controlled data enters the system.
+# BFS is run from each source; when a path reaches a sink (in sinks.yaml),
+# a TaintChain is recorded and returned via the /taint endpoint.
+
+sources:
+  # Android-specific sources (Intent, IPC, user input)
+  - pattern: "getIntent("
+    sourceCategory: "ANDROID_INTENT"
+  - pattern: "getExtras("
+    sourceCategory: "ANDROID_INTENT"
+  - pattern: "getData("
+    sourceCategory: "ANDROID_INTENT"
+  - pattern: "getStringExtra("
+    sourceCategory: "ANDROID_INTENT"
+  - pattern: "getAction("
+    sourceCategory: "ANDROID_INTENT"
+  - pattern: "onReceive("
+    sourceCategory: "BROADCAST_RECEIVER"
+  - pattern: "ContentResolver.query("
+    sourceCategory: "CONTENT_PROVIDER"
+  - pattern: "ContentResolver.openInputStream("
+    sourceCategory: "CONTENT_PROVIDER"
+  # Network sources
+  - pattern: "HttpURLConnection.getInputStream("
+    sourceCategory: "NETWORK"
+  - pattern: "Socket.getInputStream("
+    sourceCategory: "NETWORK"
+  - pattern: "URLConnection.getInputStream("
+    sourceCategory: "NETWORK"
+  - pattern: "getInputStream("
+    sourceCategory: "NETWORK"
+  # File / storage sources
+  - pattern: "FileInputStream("
+    sourceCategory: "FILE"
+  - pattern: "openFileInput("
+    sourceCategory: "FILE"
+  - pattern: "SharedPreferences.getString("
+    sourceCategory: "SHARED_PREFS"
+  - pattern: "SharedPreferences.getInt("
+    sourceCategory: "SHARED_PREFS"
+  # Web / JS bridge sources
+  - pattern: "WebView.loadUrl("
+    sourceCategory: "WEBVIEW"
+  - pattern: "shouldOverrideUrlLoading("
+    sourceCategory: "WEBVIEW"
+  - pattern: "addJavascriptInterface("
+    sourceCategory: "WEBVIEW"
+  # General Java sources
+  - pattern: "System.getenv("
+    sourceCategory: "ENV"
+  - pattern: "System.getProperty("
+    sourceCategory: "ENV"
+  - pattern: "BufferedReader.readLine("
+    sourceCategory: "STDIN"
+  - pattern: "Scanner.next("
+    sourceCategory: "STDIN"
+  - pattern: "HttpServletRequest.getParameter("
+    sourceCategory: "HTTP_PARAM"
+  - pattern: "HttpServletRequest.getHeader("
+    sourceCategory: "HTTP_PARAM"
+  - pattern: "HttpServletRequest.getInputStream("
+    sourceCategory: "HTTP_PARAM"

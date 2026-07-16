@@ -280,17 +280,29 @@ function DropZone({ onLoad }) {
 
 // ─── Main MobSF Viewer ────────────────────────────────────────────────────────
 export function MobSFViewer() {
-  const [report, setReport] = useState(null);
+  const [report, setReport] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('mobsf_report')); } catch { return null; }
+  });
   const [tab, setTab] = useState('overview');
+
+  const handleSetReport = useCallback((data) => {
+    setReport(data);
+    if (data) {
+      localStorage.setItem('mobsf_report', JSON.stringify(data));
+    } else {
+      localStorage.removeItem('mobsf_report');
+    }
+  }, []);
 
   if (!report) {
     return (
       <div style={{ padding: '28px 32px', maxWidth: 800 }}>
         <SectionHeader title="MobSF Report Viewer" subtitle="Import a MobSF static analysis JSON report to visualize findings" />
-        <DropZone onLoad={setReport} />
+        <DropZone onLoad={handleSetReport} />
       </div>
     );
   }
+
 
   // Compute stats
   const permEntries = report.permissions ? Object.entries(report.permissions) : [];
@@ -325,9 +337,10 @@ export function MobSFViewer() {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>MobSF {report.version}</span>
-          <Btn variant="subtle" size="sm" onClick={() => setReport(null)}><Upload size={13} /> Load another</Btn>
+          <Btn variant="subtle" size="sm" onClick={() => handleSetReport(null)}><Upload size={13} /> Load another</Btn>
         </div>
       </div>
+
 
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 24 }}>

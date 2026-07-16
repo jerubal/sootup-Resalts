@@ -253,6 +253,25 @@ public class AnalysisController {
         return ResponseEntity.ok(path);
     }
 
+    @GetMapping("/{jobId}/taint")
+    public ResponseEntity<List<com.sootup.platform.dto.TaintChain>> getTaintChains(@PathVariable String jobId) {
+        AnalysisJob job = jobStore.get(jobId)
+                .orElseThrow(() -> new NoSuchElementException("Job not found: " + jobId));
+
+        if (job.getStatus() != AnalysisJob.Status.COMPLETED) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        // Lazy computation and caching of taint chains
+        if (job.getTaintChains() == null) {
+            List<com.sootup.platform.dto.TaintChain> chains = analysisService.computeTaintChains(job);
+            job.setTaintChains(chains);
+        }
+
+        return ResponseEntity.ok(job.getTaintChains());
+    }
+
+
     @GetMapping("/{jobId}/export")
     public ResponseEntity<Map<String, Object>> exportResults(@PathVariable String jobId) {
         AnalysisJob job = jobStore.get(jobId)

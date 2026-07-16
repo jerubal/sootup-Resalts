@@ -6,7 +6,11 @@ import { StatusBadge, ProgressBar, StatCard, Tabs, Card, SectionHeader, Btn, Ske
 import { CallGraphViewer } from './CallGraphViewer';
 import { CfgViewer } from './CfgViewer';
 import { JimpleBrowser } from './JimpleBrowser';
-import { Network, GitBranch, Code2, Download, Cpu, Box, ArrowLeft, AlertCircle } from 'lucide-react';
+import { TaintViewer } from './TaintViewer';
+import { CrossRefViewer } from './CrossRefViewer';
+import { Network, GitBranch, Code2, Download, Cpu, Box, ArrowLeft, AlertCircle, ShieldAlert, FileSearch } from 'lucide-react';
+
+
 
 function targetName(path) {
   if (!path) return 'Unknown';
@@ -68,7 +72,10 @@ export function JobDetail() {
     { id: 'callgraph', label: 'Call Graph', icon: Network },
     { id: 'cfg',       label: 'CFG Browser', icon: GitBranch },
     { id: 'jimple',    label: 'Jimple IR', icon: Code2 },
+    { id: 'taint',     label: 'Taint Analysis', icon: ShieldAlert },
+    { id: 'crossref',  label: 'MobSF Cross-Ref', icon: FileSearch },
   ];
+
 
   return (
     <div style={{ padding: '24px 32px', maxWidth: 1400, flex: 1 }}>
@@ -158,6 +165,26 @@ export function JobDetail() {
               </div>
             )}
             {tab === 'jimple' && <JimpleBrowser jobId={jobId} methods={[]} />}
+            {tab === 'taint' && (
+              <TaintViewer
+                jobId={jobId}
+                onSelectPath={(chain) => {
+                  setTab('callgraph');
+                  // We can trigger pathfinding by changing route/parameters or setting local state if wanted, 
+                  // but switching tabs gives them the option to explore manually.
+                }}
+              />
+            )}
+            {tab === 'crossref' && (
+              <CrossRefViewer
+                jobId={jobId}
+                onSelectMethod={(methodSig) => {
+                  setCfgMethod(methodSig);
+                  setTab('cfg');
+                }}
+              />
+            )}
+
           </div>
         </Card>
       )}
