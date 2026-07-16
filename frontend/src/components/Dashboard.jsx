@@ -171,7 +171,7 @@ export function Dashboard() {
         subtitle="Static bytecode analysis results from SootUp"
         actions={
           <>
-            <div style={{ display: 'flex', gap: 0, background: 'var(--bg-elevated)', borderRadius: 6, padding: 2, border: '1px solid var(--bg-border)' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 0, background: 'var(--bg-elevated)', borderRadius: 6, padding: 2, border: '1px solid var(--bg-border)' }}>
               {['all','running','completed','failed'].map(f => (
                 <button key={f} onClick={() => setFilter(f)} style={{
                   background: filter === f ? 'var(--bg-border)' : 'none',

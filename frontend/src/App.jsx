@@ -200,7 +200,7 @@ function AppShell() {
             <FlaskConical size={14} color="var(--accent)" />
           </div>
           <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>SootUp</span>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 2 }}>Analysis Platform</span>
+          <span className="hide-on-mobile-sm" style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 2 }}>Analysis Platform</span>
         </div>
         <button
           onClick={() => setMobileMenuOpen(true)}

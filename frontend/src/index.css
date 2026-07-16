@@ -210,8 +210,12 @@ code, .mono {
 ::-webkit-scrollbar-thumb  { background: var(--bg-border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #3a3a3f; }
 
-
-
+/* ── Mobile Small Helpers (e.g. 320px screens) ────────────────────────── */
+@media (max-width: 400px) {
+  .hide-on-mobile-sm {
+    display: none !important;
+  }
+}
 
 /* ── Tailwind tokens ──────────────────────────────────────────────────── */
 @theme {
