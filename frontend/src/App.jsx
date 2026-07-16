@@ -6,8 +6,10 @@ import { NewAnalysisForm } from './components/NewAnalysisForm';
 import { JobDetail } from './components/JobDetail';
 import { MobSFViewer } from './components/MobSFViewer';
 import { DiffViewer } from './components/DiffViewer';
+import { CommandPalette } from './components/CommandPalette';
 import { LayoutGrid, PlusCircle, FlaskConical, ShieldAlert, GitCompare } from 'lucide-react';
 import './index.css';
+
 
 
 function Sidebar() {
@@ -97,9 +99,11 @@ export default function App() {
     <BrowserRouter>
       <ToastProvider>
         <JobsProvider>
+          <CommandPalette />
           <AppShell />
         </JobsProvider>
       </ToastProvider>
     </BrowserRouter>
   );
 }
+

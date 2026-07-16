@@ -9,7 +9,9 @@ import { JimpleBrowser } from './JimpleBrowser';
 import { TaintViewer } from './TaintViewer';
 import { CrossRefViewer } from './CrossRefViewer';
 import { PentestReportGenerator } from './PentestReportGenerator';
-import { Network, GitBranch, Code2, Download, Cpu, Box, ArrowLeft, AlertCircle, ShieldAlert, FileSearch, FileText } from 'lucide-react';
+import { GodModeConsole } from './GodModeConsole';
+import { Network, GitBranch, Code2, Download, Cpu, Box, ArrowLeft, AlertCircle, ShieldAlert, FileSearch, FileText, Terminal } from 'lucide-react';
+
 
 
 
@@ -77,7 +79,9 @@ export function JobDetail() {
     { id: 'taint',     label: 'Taint Analysis', icon: ShieldAlert },
     { id: 'crossref',  label: 'MobSF Cross-Ref', icon: FileSearch },
     { id: 'report',    label: 'Audit Report', icon: FileText },
+    { id: 'godmode',   label: 'God Mode', icon: Terminal },
   ];
+
 
 
 
@@ -189,6 +193,8 @@ export function JobDetail() {
               />
             )}
             {tab === 'report' && <PentestReportGenerator jobId={jobId} />}
+            {tab === 'godmode' && <GodModeConsole jobId={jobId} />}
+
 
 
           </div>
