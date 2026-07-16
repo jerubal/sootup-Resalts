@@ -1,39 +1,35 @@
-@import "tailwindcss";
-
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
+@import "tailwindcss";
+
 :root {
-  --bg-base: #0d0d0f;
-  --bg-surface: #141416;
-  --bg-elevated: #1c1c1f;
-  --bg-border: #2a2a2e;
-  --bg-hover: #222226;
+  --bg-base: #060908;
+  --bg-surface: #0b0f0d;
+  --bg-elevated: #111714;
+  --bg-border: #1a241f;
+  --bg-hover: #16201a;
 
-  --text-primary: #f0f0f2;
-  --text-secondary: #9898a4;
-  --text-muted: #55555f;
+  --text-primary: #e6f5ed;
+  --text-secondary: #8da396;
+  --text-muted: #4e6356;
 
-  --accent: #6e7bff;
-  --accent-hover: #8490ff;
-  --accent-subtle: rgba(110, 123, 255, 0.12);
+  --accent: #00ff66;
+  --accent-hover: #33ff85;
+  --accent-subtle: rgba(0, 255, 102, 0.08);
 
-  --status-green: #22c55e;
-  --status-green-bg: rgba(34, 197, 94, 0.1);
-  --status-amber: #f59e0b;
-  --status-amber-bg: rgba(245, 158, 11, 0.1);
-  --status-red: #ef4444;
-  --status-red-bg: rgba(239, 68, 68, 0.1);
-  --status-gray: #71717a;
-  --status-gray-bg: rgba(113, 113, 122, 0.1);
+  --status-green: #00ff66;
+  --status-green-bg: rgba(0, 255, 102, 0.08);
+  --status-amber: #ffaa00;
+  --status-amber-bg: rgba(255, 170, 0, 0.08);
+  --status-red: #ff3b30;
+  --status-red-bg: rgba(255, 59, 48, 0.08);
+  --status-gray: #5c7064;
+  --status-gray-bg: rgba(92, 112, 100, 0.08);
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
-html {
-  font-size: 14px;
-}
+html { font-size: 14px; }
 
 body {
   background-color: var(--bg-base);
@@ -43,34 +39,159 @@ body {
   padding: 0;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  overflow: hidden;
 }
 
+/* ── Layout ────────────────────────────────────────────────────────────── */
+.app-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  width: 100vw;
+  background-color: var(--bg-base);
+  background-image:
+    radial-gradient(at 50% 0%, rgba(0, 255, 102, 0.04) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(0, 255, 102, 0.01) 0px, transparent 40%);
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 0;
+  }
+}
+
+.app-box {
+  width: 100%;
+  max-width: 1360px;
+  height: 90vh;
+  min-height: 680px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--bg-border);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px -12px rgba(0,0,0,0.85), 0 0 40px 0 rgba(0,255,102,0.01);
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+@media (max-width: 768px) {
+  .app-box {
+    flex-direction: column;
+    height: 100vh;
+    border-radius: 0;
+    border: none;
+  }
+}
+
+/* ── Page transitions ──────────────────────────────────────────────────── */
+@keyframes slideFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+.page-transition {
+  animation: slideFadeIn 0.25s cubic-bezier(0.16,1,0.3,1) forwards;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Living Status dot ────────────────────────────────────────────────── */
+@keyframes liveRing {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34,211,238,0.6); transform: scale(1); }
+  50%       { box-shadow: 0 0 0 6px rgba(34,211,238,0); transform: scale(1.15); }
+}
+@keyframes liveRingAmber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.5); }
+  50%       { box-shadow: 0 0 0 5px rgba(245,158,11,0); }
+}
+
+/* ── Spinner ──────────────────────────────────────────────────────────── */
+@keyframes spin {
+  from { transform: rotate(0deg);   }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── REPL blink ───────────────────────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* ── Cinematic graph reveal ───────────────────────────────────────────── */
+@keyframes nodeReveal {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1);   }
+}
+
+/* ── Heatmap glow ─────────────────────────────────────────────────────── */
+@keyframes heatmapGlow {
+  0%, 100% { filter: brightness(1);   }
+  50%       { filter: brightness(1.25);}
+}
+
+/* ── Risk gauge arc ───────────────────────────────────────────────────── */
+@keyframes arcFill {
+  from { stroke-dashoffset: 283; }
+}
+.risk-gauge-arc { animation: arcFill 1.2s cubic-bezier(0.16,1,0.3,1) forwards; }
+
+/* ── Focus mode overlay ───────────────────────────────────────────────── */
+.graph-focus-mode {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.82);
+  backdrop-filter: blur(2px);
+  z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  animation: slideFadeIn 0.2s ease forwards;
+}
+
+/* ── Treemap nodes ────────────────────────────────────────────────────── */
+.treemap-node {
+  transition: filter 0.15s, transform 0.15s;
+  cursor: pointer;
+}
+.treemap-node:hover {
+  filter: brightness(1.35);
+  z-index: 2;
+}
+
+/* ── Typography ───────────────────────────────────────────────────────── */
 code, .mono {
   font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
   font-size: 0.85em;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: var(--bg-surface);
-}
-::-webkit-scrollbar-thumb {
-  background: var(--bg-border);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3f;
+/* ── Scrollbars ───────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: var(--bg-surface); }
+::-webkit-scrollbar-thumb  { background: var(--bg-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3f; }
+
+/* ── Mobile Layout Overlay ────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .sidebar-nav {
+    position: fixed !important;
+    top: 0; bottom: 0; left: 0;
+    z-index: 1000;
+    transform: translateX(-100%);
+    box-shadow: 20px 0 30px rgba(0,0,0,0.8);
+  }
+  .sidebar-nav.mobile-open {
+    transform: translateX(0);
+  }
+  .mobile-topbar {
+    display: flex !important;
+  }
 }
 
-/* Tailwind dark theme overrides */
+/* ── Tailwind tokens ──────────────────────────────────────────────────── */
 @theme {
-  --color-base: #0d0d0f;
-  --color-surface: #141416;
+  --color-base:     #0d0d0f;
+  --color-surface:  #141416;
   --color-elevated: #1c1c1f;
-  --color-border: #2a2a2e;
-  --color-hover: #222226;
-  --color-accent: #6e7bff;
+  --color-border:   #2a2a2e;
+  --color-hover:    #222226;
+  --color-accent:   #6e7bff;
 }

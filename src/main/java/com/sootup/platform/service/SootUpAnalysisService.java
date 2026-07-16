@@ -114,6 +114,25 @@ public class SootUpAnalysisService {
         return null;
     }
 
+    /** Exposes the live sink catalog for hot-swapping via GM-2. */
+    public Map<String, String> getSinkCatalog() { return sinkCatalog; }
+
+    /** Exposes the live source catalog. */
+    public Map<String, String> getSourceCatalog() { return sourceCatalog; }
+
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private TaintPropagationEngine taintPropagationEngine;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private PolicyEngine policyEngine;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private ScannerOrchestrator scannerOrchestrator;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private JobStore jobStore;
+
     @Async("analysisTaskExecutor")
     public void runAnalysis(AnalysisJob job) {
         CompletableFuture<Void> future = new CompletableFuture<>();
@@ -121,127 +140,208 @@ public class SootUpAnalysisService {
 
         try {
             job.setStatus(AnalysisJob.Status.RUNNING);
-            job.setProgress(10);
-            job.setMessage("Initializing SootUp environments...");
+            jobStore.save(job);
 
-            // Sanitize target path against path traversal
-            Path targetPath = Paths.get(job.getRequest().getTargetPath()).normalize().toAbsolutePath();
-            if (targetPath.toString().contains("..")) {
-                throw new SecurityException("Potential path traversal detected in target path: " + targetPath);
-            }
+            // Container to pass JavaView between steps in the workflow engine
+            final JavaView[] viewContainer = new JavaView[1];
 
-            // Create input locations list
-            List<AnalysisInputLocation> inputLocations = new ArrayList<>();
-            inputLocations.add(PathBasedAnalysisInputLocation.create(targetPath, null));
+            WorkflowEngine workflow = new WorkflowEngine();
 
-            // Attach JDK stub/runtime
-            int version = job.getRequest().getBytecodeVersion();
-            if (version >= 9) {
-                inputLocations.add(new JrtFileSystemAnalysisInputLocation());
-            } else {
-                inputLocations.add(new DefaultRTJarAnalysisInputLocation());
-            }
+            // Capability 1: Prep environment & extraction
+            workflow.addStep(new WorkflowEngine.AnalysisStep() {
+                public String getName() { return "Environment Preparation & Class Extraction"; }
+                public int getProgressWeight() { return 20; }
+                public void execute(AnalysisJob job, JavaView[] viewContainer) throws Exception {
+                    // Sanitize target path against path traversal
+                    Path targetPath = Paths.get(job.getRequest().getTargetPath()).normalize().toAbsolutePath();
+                    if (targetPath.toString().contains("..")) {
+                        throw new SecurityException("Potential path traversal detected in target path: " + targetPath);
+                    }
 
-            job.setProgress(30);
-            job.setMessage("Building SootUp View...");
+                    // Create input locations list
+                    List<AnalysisInputLocation> inputLocations = new ArrayList<>();
+                    inputLocations.add(PathBasedAnalysisInputLocation.create(targetPath, null));
 
-            // Build JavaView directly
-            JavaView view = new JavaView(inputLocations);
-
-            job.setProgress(50);
-            job.setMessage("Extracting classes and methods...");
-
-            // Scan directory/jar for target classes specifically to avoid scanning JDK classes
-            List<String> targetClassNames = findClassNames(targetPath);
-            if (targetClassNames.isEmpty() && job.getRequest().getEntryPoints() != null) {
-                // If it's a specific single class or empty dir, add the entry point class
-                for (String ep : job.getRequest().getEntryPoints()) {
-                    String clean = ep.trim().replace("<", "").replace(">", "");
-                    if (clean.contains(":")) {
-                        targetClassNames.add(clean.split(":")[0].trim());
+                    // Attach JDK stub/runtime
+                    int version = job.getRequest().getBytecodeVersion();
+                    if (version >= 9) {
+                        inputLocations.add(new JrtFileSystemAnalysisInputLocation());
                     } else {
-                        targetClassNames.add(clean);
+                        inputLocations.add(new DefaultRTJarAnalysisInputLocation());
                     }
-                }
-            }
 
-            List<String> loadedClasses = new ArrayList<>();
-            Map<String, String> methodJimpleMap = job.getMethodJimpleMap();
-            Map<String, GraphResponse> methodCfgMap = job.getMethodCfgMap();
+                    JavaView view = new JavaView(inputLocations);
+                    viewContainer[0] = view;
 
-            int totalMethods = 0;
-            IdentifierFactory factory = view.getIdentifierFactory();
-            
-            for (String className : targetClassNames) {
-                ClassType classType = factory.getClassType(className);
-                Optional<JavaSootClass> optClass = view.getClass(classType);
-                if (optClass.isPresent()) {
-                    JavaSootClass sootClass = optClass.get();
-                    loadedClasses.add(sootClass.getName());
-
-                    for (SootMethod method : sootClass.getMethods()) {
-                        totalMethods++;
-                        String methodSig = method.getSignature().toString();
-
-                        if (job.getRequest().getAnalysisFlags().contains("jimple")) {
-                            methodJimpleMap.put(methodSig, method.getBody().toString());
-                        }
-
-                        if (job.getRequest().getAnalysisFlags().contains("cfg")) {
-                            GraphResponse cfgGraph = buildCfgGraph(method);
-                            methodCfgMap.put(methodSig, cfgGraph);
+                    // Extract classes
+                    List<String> targetClassNames = findClassNames(targetPath);
+                    if (targetClassNames.isEmpty() && job.getRequest().getEntryPoints() != null) {
+                        for (String ep : job.getRequest().getEntryPoints()) {
+                            String clean = ep.trim().replace("<", "").replace(">", "");
+                            if (clean.contains(":")) {
+                                targetClassNames.add(clean.split(":")[0].trim());
+                            } else {
+                                targetClassNames.add(clean);
+                            }
                         }
                     }
+
+                    List<String> loadedClasses = new ArrayList<>();
+                    Map<String, String> methodJimpleMap = job.getMethodJimpleMap();
+                    Map<String, GraphResponse> methodCfgMap = job.getMethodCfgMap();
+
+                    int totalMethods = 0;
+                    IdentifierFactory factory = view.getIdentifierFactory();
+                    
+                    for (String className : targetClassNames) {
+                        ClassType classType = factory.getClassType(className);
+                        Optional<JavaSootClass> optClass = view.getClass(classType);
+                        if (optClass.isPresent()) {
+                            JavaSootClass sootClass = optClass.get();
+                            loadedClasses.add(sootClass.getName());
+
+                            for (SootMethod method : sootClass.getMethods()) {
+                                totalMethods++;
+                                String methodSig = method.getSignature().toString();
+
+                                if (job.getRequest().getAnalysisFlags().contains("jimple")) {
+                                    methodJimpleMap.put(methodSig, method.getBody().toString());
+                                }
+
+                                if (job.getRequest().getAnalysisFlags().contains("cfg")) {
+                                    GraphResponse cfgGraph = buildCfgGraph(method);
+                                    methodCfgMap.put(methodSig, cfgGraph);
+                                }
+                            }
+                        }
+                    }
+                    job.setLoadedClasses(loadedClasses);
+                    job.setMethodCount(totalMethods);
+                    jobStore.save(job);
                 }
-            }
-            job.setLoadedClasses(loadedClasses);
-            job.setMethodCount(totalMethods);
+            });
 
-            // Compute Call Graph if requested
-            if (job.getRequest().getAnalysisFlags().contains("callGraph")) {
-                job.setProgress(70);
-                job.setMessage("Constructing Call Graph...");
+            // Capability 2: Call Graph Construction
+            workflow.addStep(new WorkflowEngine.AnalysisStep() {
+                public String getName() { return "Call Graph Generation"; }
+                public int getProgressWeight() { return 20; }
+                public void execute(AnalysisJob job, JavaView[] viewContainer) throws Exception {
+                    JavaView view = viewContainer[0];
+                    if (job.getRequest().getAnalysisFlags().contains("callGraph")) {
+                        List<MethodSignature> resolvedEntries = resolveEntryPoints(view, job.getRequest().getEntryPoints());
+                        if (resolvedEntries.isEmpty()) {
+                            throw new IllegalArgumentException("No valid entry points could be resolved from: " + job.getRequest().getEntryPoints());
+                        }
 
-                List<MethodSignature> resolvedEntries = resolveEntryPoints(view, job.getRequest().getEntryPoints());
-                if (resolvedEntries.isEmpty()) {
-                    throw new IllegalArgumentException("No valid entry points could be resolved from: " + job.getRequest().getEntryPoints());
+                        CallGraphAlgorithm cgAlgorithm;
+                        if ("RTA".equalsIgnoreCase(job.getRequest().getCgAlgorithm())) {
+                            cgAlgorithm = new RapidTypeAnalysisAlgorithm(view);
+                        } else {
+                            cgAlgorithm = new ClassHierarchyAnalysisAlgorithm(view);
+                        }
+
+                        CallGraph cg = cgAlgorithm.initialize(resolvedEntries);
+                        GraphResponse callGraphResponse = convertCallGraphToResponse(cg, resolvedEntries);
+                        job.setCallGraph(callGraphResponse);
+                        job.setEdgeCount(callGraphResponse.getEdges().size());
+                    }
+                    jobStore.save(job);
                 }
+            });
 
-                CallGraphAlgorithm cgAlgorithm;
-                if ("RTA".equalsIgnoreCase(job.getRequest().getCgAlgorithm())) {
-                    cgAlgorithm = new RapidTypeAnalysisAlgorithm(view);
-                } else {
-                    cgAlgorithm = new ClassHierarchyAnalysisAlgorithm(view);
+            // Capability 3: Variable-Tracking Taint Flow propagation (Intra/Interprocedural CFG walker)
+            workflow.addStep(new WorkflowEngine.AnalysisStep() {
+                public String getName() { return "CFG-based Variable Taint Tracking"; }
+                public int getProgressWeight() { return 20; }
+                public void execute(AnalysisJob job, JavaView[] viewContainer) throws Exception {
+                    JavaView view = viewContainer[0];
+                    List<com.sootup.platform.dto.TaintChain> variableTaints = taintPropagationEngine.analyzeTaintFlows(
+                        job, view, job.getLoadedClasses(), sourceCatalog, sinkCatalog
+                    );
+                    
+                    // Fallback/combine with CG paths if empty
+                    List<com.sootup.platform.dto.TaintChain> callGraphTaints = computeTaintChains(job);
+                    Set<String> existingChains = new HashSet<>();
+                    List<com.sootup.platform.dto.TaintChain> combined = new ArrayList<>();
+                    
+                    for (com.sootup.platform.dto.TaintChain tc : variableTaints) {
+                        String key = tc.getSource() + "->" + tc.getSink();
+                        if (existingChains.add(key)) {
+                            combined.add(tc);
+                        }
+                    }
+                    for (com.sootup.platform.dto.TaintChain tc : callGraphTaints) {
+                        String key = tc.getSource() + "->" + tc.getSink();
+                        if (existingChains.add(key)) {
+                            combined.add(tc);
+                        }
+                    }
+                    
+                    job.setTaintChains(combined);
+                    jobStore.save(job);
                 }
+            });
 
-                CallGraph cg = cgAlgorithm.initialize(resolvedEntries);
-                GraphResponse callGraphResponse = convertCallGraphToResponse(cg, resolvedEntries);
-                job.setCallGraph(callGraphResponse);
-                job.setEdgeCount(callGraphResponse.getEdges().size());
-            }
+            // Capability 4: Third-Party Scanner Orchestration
+            workflow.addStep(new WorkflowEngine.AnalysisStep() {
+                public String getName() { return "Scanner Orchestration"; }
+                public int getProgressWeight() { return 20; }
+                public void execute(AnalysisJob job, JavaView[] viewContainer) throws Exception {
+                    List<ScannerOrchestrator.Vulnerability> externalVulns = scannerOrchestrator.runExternalScans(job);
+                    List<Map<String, Object>> mappedVulns = new ArrayList<>();
+                    for (ScannerOrchestrator.Vulnerability v : externalVulns) {
+                        Map<String, Object> map = new HashMap<>();
+                        map.put("scanner", v.scanner);
+                        map.put("severity", v.severity);
+                        map.put("ruleId", v.ruleId);
+                        map.put("description", v.description);
+                        map.put("targetFile", v.targetFile);
+                        mappedVulns.add(map);
+                    }
+                    job.setExternalVulnerabilities(mappedVulns);
+                    jobStore.save(job);
+                }
+            });
+
+            // Capability 5: Policy-as-Code Evaluation
+            workflow.addStep(new WorkflowEngine.AnalysisStep() {
+                public String getName() { return "Policy Compliance Evaluation"; }
+                public int getProgressWeight() { return 10; }
+                public void execute(AnalysisJob job, JavaView[] viewContainer) throws Exception {
+                    List<String> violations = policyEngine.evaluatePolicies(job.getTaintChains());
+                    job.setPolicyViolations(violations);
+                    if (!violations.isEmpty()) {
+                        job.setMessage("Analysis completed with " + violations.size() + " policy violations!");
+                    } else {
+                        job.setMessage("Analysis completed successfully. Compliance check passed!");
+                    }
+                    jobStore.save(job);
+                }
+            });
+
+            workflow.run(job, viewContainer);
 
             job.setProgress(100);
             job.setStatus(AnalysisJob.Status.COMPLETED);
-            job.setMessage("Analysis completed successfully.");
             job.setCompletedAt(System.currentTimeMillis());
+            jobStore.save(job);
 
         } catch (SecurityException e) {
             job.setStatus(AnalysisJob.Status.FAILED);
             job.setMessage("Security Error: " + e.getMessage());
             job.setCompletedAt(System.currentTimeMillis());
+            jobStore.save(job);
         } catch (Exception e) {
             job.setStatus(AnalysisJob.Status.FAILED);
             job.setMessage("Analysis failed: " + e.getMessage());
             job.setCompletedAt(System.currentTimeMillis());
+            jobStore.save(job);
         } finally {
             runningTasks.remove(job.getJobId());
             future.complete(null);
-            
-            // Aggressively trigger JVM GC to free loaded view class allocations
             System.gc();
         }
     }
-
     public boolean cancelJob(String jobId) {
         CompletableFuture<?> future = runningTasks.remove(jobId);
         if (future != null) {

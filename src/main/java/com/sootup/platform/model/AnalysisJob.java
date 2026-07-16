@@ -30,6 +30,8 @@ public class AnalysisJob {
     private int edgeCount;
     // Taint analysis results (populated lazily on first /taint request)
     private List<TaintChain> taintChains = null;
+    private List<String> policyViolations = new ArrayList<>();
+    private List<Map<String, Object>> externalVulnerabilities = new ArrayList<>();
 
     public AnalysisJob(String jobId, AnalysisRequest request) {
         this.jobId = jobId;
@@ -131,5 +133,21 @@ public class AnalysisJob {
 
     public void setTaintChains(List<TaintChain> taintChains) {
         this.taintChains = taintChains;
+    }
+
+    public List<String> getPolicyViolations() {
+        return policyViolations;
+    }
+
+    public void setPolicyViolations(List<String> policyViolations) {
+        this.policyViolations = policyViolations;
+    }
+
+    public List<Map<String, Object>> getExternalVulnerabilities() {
+        return externalVulnerabilities;
+    }
+
+    public void setExternalVulnerabilities(List<Map<String, Object>> externalVulnerabilities) {
+        this.externalVulnerabilities = externalVulnerabilities;
     }
 }

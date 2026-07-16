@@ -1,0 +1,13 @@
+policies:
+  - name: "No network exposure of file inputs"
+    denySourceCategory: "FILE"
+    denySinkRiskCategory: "NETWORK"
+  - name: "No shell commands via network inputs"
+    denySourceCategory: "NETWORK"
+    denySinkRiskCategory: "COMMAND_INJECTION"
+  - name: "No database execution of user inputs"
+    denySourceCategory: "STDIN"
+    denySinkRiskCategory: "SQL_INJECTION"
+  - name: "Block environment variable leaks to network"
+    denySourceCategory: "ENV"
+    denySinkRiskCategory: "NETWORK"

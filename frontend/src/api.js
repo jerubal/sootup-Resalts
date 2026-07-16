@@ -1,102 +1,44 @@
 const BASE = '/api/v1/analyses';
 
+/** Generic helper: wraps fetch + json parse + error throw */
+async function request(url, method = 'GET', body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw Object.assign(new Error(err.error || err.message || `HTTP ${res.status}`), { response: { data: err } });
+  }
+  return { data: await res.json() };
+}
+
 export const api = {
-  // Submit a new analysis job
-  submitJob: async (payload) => {
-    const res = await fetch(BASE, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || `HTTP ${res.status}`);
-    }
-    return res.json();
+  /* ── Analysis Jobs ───────────────────────────────────────────────── */
+  submitJob:       (payload) => request(BASE, 'POST', payload).then(r => r.data),
+  listJobs:        ()        => fetch(BASE).then(r => r.ok ? r.json() : []),
+  getJobStatus:    (id)      => request(`${BASE}/${id}`).then(r => r.data),
+  getJobResult:    (id)      => request(`${BASE}/${id}/result`).then(r => r.data),
+  getCallGraph:    (id)      => request(`${BASE}/${id}/callgraph`).then(r => r.data),
+  getCfg:          (id, m)   => request(`${BASE}/${id}/cfg/${encodeURIComponent(m)}`).then(r => r.data),
+  getJimple:       (id, m)   => request(`${BASE}/${id}/jimple/${encodeURIComponent(m)}`).then(r => r.data),
+  exportJob:       (id)      => request(`${BASE}/${id}/export`).then(r => r.data),
+  cancelJob:       (id)      => request(`${BASE}/${id}`, 'DELETE').then(r => r.data),
+  getShortestPath: (id, f, t) => {
+    const p = new URLSearchParams({ from: f, to: t });
+    return request(`${BASE}/${id}/paths?${p}`).then(r => r.data);
+  },
+  getTaintChains:  (id)      => request(`${BASE}/${id}/taint`).then(r => r.data),
+  diffJobs:        (a, b)    => {
+    const p = new URLSearchParams({ jobId1: a, jobId2: b });
+    return request(`${BASE}/diff?${p}`).then(r => r.data);
   },
 
-  // Get all jobs (backend returns list or we list from local cache)
-  listJobs: async () => {
-    const res = await fetch(BASE);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  },
+  /* ── GM-1: REPL Query Console ───────────────────────────────────── */
+  post: (path, body) => request(`/api/v1${path}`, 'POST', body),
 
-  // Poll status of a single job
-  getJobStatus: async (jobId) => {
-    const res = await fetch(`${BASE}/${jobId}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  },
+  /* ── GM-2: Live catalog hot-swap ────────────────────────────────── */
+  put:  (path, body) => request(`/api/v1${path}`, 'PUT', body),
 
-  // Get full result summary
-  getJobResult: async (jobId) => {
-    const res = await fetch(`${BASE}/${jobId}/result`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  },
-
-  // Get call graph
-  getCallGraph: async (jobId) => {
-    const res = await fetch(`${BASE}/${jobId}/callgraph`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  },
-
-  // Get CFG for a specific method signature
-  getCfg: async (jobId, methodSig) => {
-    const encoded = encodeURIComponent(methodSig);
-    const res = await fetch(`${BASE}/${jobId}/cfg/${encoded}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  },
-
-  // Get Jimple IR for a specific method signature
-  getJimple: async (jobId, methodSig) => {
-    const encoded = encodeURIComponent(methodSig);
-    const res = await fetch(`${BASE}/${jobId}/jimple/${encoded}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  },
-
-  // Get full export
-  exportJob: async (jobId) => {
-    const res = await fetch(`${BASE}/${jobId}/export`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  },
-
-  // Cancel a running job
-  cancelJob: async (jobId) => {
-    const res = await fetch(`${BASE}/${jobId}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  },
-
-  // Get shortest call-graph path between two method signatures (Fix 1).
-  // Calls the real backend BFS over the full graph — not limited to paginated client data.
-  getShortestPath: async (jobId, from, to) => {
-    const params = new URLSearchParams({ from, to });
-    const res = await fetch(`${BASE}/${jobId}/paths?${params}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json(); // returns string[] — ordered list of method IDs on the path
-  },
-
-  // Get computed taint chains (source -> sink paths) (FR-3c)
-  getTaintChains: async (jobId) => {
-    const res = await fetch(`${BASE}/${jobId}/taint`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  },
-
-  // Diff two completed analysis jobs (FR-F)
-  diffJobs: async (jobId1, jobId2) => {
-    const params = new URLSearchParams({ jobId1, jobId2 });
-    const res = await fetch(`${BASE}/diff?${params}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  },
+  /* ── GM-4/6/8: Admin GET endpoints ─────────────────────────────── */
+  get:  (path)       => request(`/api/v1${path}`, 'GET'),
 };
-
-
-

@@ -337,36 +337,213 @@ public class AnalysisController {
     }
 
     @GetMapping("/{jobId}/export")
-
-    public ResponseEntity<Map<String, Object>> exportResults(@PathVariable String jobId) {
+    public ResponseEntity<?> exportResults(
+            @PathVariable String jobId,
+            @RequestParam(defaultValue = "json") String format) {
+        
         AnalysisJob job = jobStore.get(jobId)
                 .orElseThrow(() -> new NoSuchElementException("Job not found: " + jobId));
 
         if (job.getStatus() != AnalysisJob.Status.COMPLETED) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", "Conflict", "message", "Analysis job is not completed yet. Status: " + job.getStatus()));
         }
 
-        Map<String, Object> export = new HashMap<>();
-        export.put("jobId", jobId);
-        export.put("request", job.getRequest());
-        export.put("loadedClasses", job.getLoadedClasses());
-        export.put("methodCount", job.getMethodCount());
-        export.put("edgeCount", job.getEdgeCount());
-        export.put("callGraph", job.getCallGraph());
-        export.put("jimple", job.getMethodJimpleMap());
-        export.put("cfg", job.getMethodCfgMap());
+        String rawTarget = job.getRequest().getTargetPath();
+        String targetName = rawTarget != null ? new java.io.File(rawTarget).getName() : "analysis";
+        String filenameBase = targetName + "_" + jobId.substring(0, 8) + "_results";
 
-        return ResponseEntity.ok(export);
+        if ("html".equalsIgnoreCase(format)) {
+            String html = generateHtmlReport(job, targetName);
+            return ResponseEntity.ok()
+                    .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filenameBase + ".html\"")
+                    .contentType(org.springframework.http.MediaType.TEXT_HTML)
+                    .body(html);
+        } else if ("zip".equalsIgnoreCase(format)) {
+            byte[] zipBytes = generateZipArchive(job, targetName);
+            return ResponseEntity.ok()
+                    .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filenameBase + ".zip\"")
+                    .contentType(org.springframework.http.MediaType.APPLICATION_OCTET_STREAM)
+                    .body(zipBytes);
+        } else {
+            // Default "json"
+            Map<String, Object> export = new LinkedHashMap<>();
+            export.put("jobId", jobId);
+            export.put("request", job.getRequest());
+            export.put("loadedClasses", job.getLoadedClasses());
+            export.put("methodCount", job.getMethodCount());
+            export.put("edgeCount", job.getEdgeCount());
+            export.put("callGraph", job.getCallGraph());
+            export.put("taintChains", job.getTaintChains());
+            export.put("policyViolations", job.getPolicyViolations());
+            export.put("externalVulnerabilities", job.getExternalVulnerabilities());
+            export.put("jimple", job.getMethodJimpleMap());
+            export.put("cfg", job.getMethodCfgMap());
+
+            try {
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                String prettyJson = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(export);
+                return ResponseEntity.ok()
+                        .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filenameBase + ".json\"")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .body(prettyJson);
+            } catch (Exception e) {
+                return ResponseEntity.internalServerError().body(Map.of("error", "Internal Error", "message", "JSON formatting failed"));
+            }
+        }
     }
+
+    private String generateHtmlReport(AnalysisJob job, String targetName) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>SootUp Security Audit Report</title>");
+        sb.append("<style>");
+        sb.append("body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #060908; color: #e6f5ed; margin: 0; padding: 40px; }");
+        sb.append(".report-container { max-width: 1000px; margin: 0 auto; background: #0b0f0d; border: 1px solid #1a241f; border-radius: 12px; padding: 32px; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }");
+        sb.append("h1 { color: #00ff66; margin-top: 0; font-size: 28px; border-bottom: 2px solid #1a241f; padding-bottom: 12px; }");
+        sb.append("h2 { color: #e6f5ed; font-size: 20px; margin-top: 32px; border-bottom: 1px solid #1a241f; padding-bottom: 8px; }");
+        sb.append("table { width: 100%; border-collapse: collapse; margin: 16px 0; }");
+        sb.append("th, td { padding: 12px; border: 1px solid #1a241f; text-align: left; font-size: 13px; }");
+        sb.append("th { background: #111714; color: #8da396; }");
+        sb.append("pre { background: #111714; padding: 16px; border-radius: 6px; overflow-x: auto; font-family: monospace; font-size: 12px; color: #00ff66; border: 1px solid #1a241f; }");
+        sb.append(".badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }");
+        sb.append(".badge-red { background: rgba(255, 59, 48, 0.15); color: #ff3b30; }");
+        sb.append(".badge-green { background: rgba(0, 255, 102, 0.15); color: #00ff66; }");
+        sb.append(".badge-amber { background: rgba(255, 170, 0, 0.15); color: #ffaa00; }");
+        sb.append("</style></head><body>");
+        sb.append("<div class=\"report-container\">");
+        sb.append("<h1>SootUp Security Audit Report</h1>");
+        
+        // Metadata / Summary
+        sb.append("<h2>Target Summary</h2>");
+        sb.append("<table>");
+        sb.append("<tr><th>Target Archive</th><td>").append(targetName).append("</td></tr>");
+        sb.append("<tr><th>Job ID</th><td>").append(job.getJobId()).append("</td></tr>");
+        sb.append("<tr><th>Classes Analyzed</th><td>").append(job.getLoadedClasses().size()).append("</td></tr>");
+        sb.append("<tr><th>Call Graph Size</th><td>").append(job.getMethodCount()).append(" nodes / ").append(job.getEdgeCount()).append(" edges</td></tr>");
+        sb.append("</table>");
+
+        // Policy violations
+        sb.append("<h2>Policy Violations</h2>");
+        if (job.getPolicyViolations() == null || job.getPolicyViolations().isEmpty()) {
+            sb.append("<p style=\"color:#00ff66\">✓ No policy violations identified.</p>");
+        } else {
+            sb.append("<table><tr><th>Violation</th></tr>");
+            for (String violation : job.getPolicyViolations()) {
+                sb.append("<tr><td><span class=\"badge badge-red\">VIOLATION</span> <code style=\"color:#ff3b30\">").append(violation).append("</code></td></tr>");
+            }
+            sb.append("</table>");
+        }
+
+        // Taint Findings
+        sb.append("<h2>Taint propagation Findings</h2>");
+        if (job.getTaintChains() == null || job.getTaintChains().isEmpty()) {
+            sb.append("<p style=\"color:#00ff66\">✓ No propagations detected.</p>");
+        } else {
+            sb.append("<table><tr><th>Source</th><th>Sink</th><th>Hop Count</th></tr>");
+            for (com.sootup.platform.dto.TaintChain tc : job.getTaintChains()) {
+                sb.append("<tr>");
+                sb.append("<td><span class=\"badge badge-amber\">").append(tc.getSourceCategory()).append("</span><br/><code>").append(tc.getSource()).append("</code></td>");
+                sb.append("<td><span class=\"badge badge-red\">").append(tc.getSinkRiskCategory()).append("</span><br/><code>").append(tc.getSink()).append("</code></td>");
+                sb.append("<td>").append(tc.getHopCount()).append("</td>");
+                sb.append("</tr>");
+            }
+            sb.append("</table>");
+        }
+
+        // Call graph snapshot listing
+        sb.append("<h2>Call Graph Entries</h2>");
+        if (job.getCallGraph() == null || job.getCallGraph().getNodes().isEmpty()) {
+            sb.append("<p>No Call Graph data available.</p>");
+        } else {
+            sb.append("<table><tr><th>Method Signature</th><th>Type</th></tr>");
+            for (com.sootup.platform.dto.GraphResponse.Node n : job.getCallGraph().getNodes()) {
+                boolean isSink = n.getData().containsKey("riskCategory");
+                sb.append("<tr>");
+                sb.append("<td><code>").append(n.getData().get("id")).append("</code></td>");
+                sb.append("<td>").append(isSink ? "<span class=\"badge badge-red\">SINK</span>" : "<span class=\"badge badge-green\">INTERNAL</span>").append("</td>");
+                sb.append("</tr>");
+            }
+            sb.append("</table>");
+        }
+
+        sb.append("</div></body></html>");
+        return sb.toString();
+    }
+
+    private byte[] generateZipArchive(AnalysisJob job, String targetName) {
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(baos)) {
+            // Write results.json
+            zos.putNextEntry(new java.util.zip.ZipEntry("results.json"));
+            Map<String, Object> export = new LinkedHashMap<>();
+            export.put("jobId", job.getJobId());
+            export.put("callGraph", job.getCallGraph());
+            export.put("taintChains", job.getTaintChains());
+            export.put("policyViolations", job.getPolicyViolations());
+            
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            zos.write(mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(export));
+            zos.closeEntry();
+
+            // Write report.html
+            zos.putNextEntry(new java.util.zip.ZipEntry("report.html"));
+            zos.write(generateHtmlReport(job, targetName).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            zos.closeEntry();
+
+            // Write individual method jimple files
+            if (job.getMethodJimpleMap() != null) {
+                for (Map.Entry<String, String> entry : job.getMethodJimpleMap().entrySet()) {
+                    String cleanName = entry.getKey().replaceAll("[^a-zA-Z0-9_.-]", "_");
+                    if (cleanName.length() > 120) {
+                        cleanName = cleanName.substring(0, 110) + "_" + Math.abs(cleanName.hashCode()) + ".txt";
+                    } else {
+                        cleanName = cleanName + ".txt";
+                    }
+                    zos.putNextEntry(new java.util.zip.ZipEntry("jimple/" + cleanName));
+                    zos.write(entry.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    zos.closeEntry();
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to generate zip archive: {}", e.getMessage());
+        }
+        return baos.toByteArray();
+    }
+
 
     private Map<String, Object> toSummaryMap(AnalysisJob job) {
         Map<String, Object> summary = new HashMap<>();
-        summary.put("jobId", job.getJobId());
-        summary.put("status", job.getStatus());
-        summary.put("progress", job.getProgress());
-        summary.put("message", job.getMessage());
-        summary.put("createdAt", job.getCreatedAt());
-        summary.put("completedAt", job.getCompletedAt());
+        summary.put("jobId",      job.getJobId());
+        summary.put("status",     job.getStatus());
+        summary.put("progress",   job.getProgress());
+        summary.put("message",    job.getMessage());
+        summary.put("createdAt",  job.getCreatedAt());
+        summary.put("submittedAt",job.getCreatedAt()); // alias for frontend
+        summary.put("completedAt",job.getCompletedAt());
+        summary.put("methodCount",job.getMethodCount());
+        summary.put("edgeCount",  job.getEdgeCount());
+
+        // Request fields used by Dashboard / risk gauge / sidebar
+        if (job.getRequest() != null) {
+            summary.put("targetPath",    job.getRequest().getTargetPath());
+            summary.put("analysisFlags", job.getRequest().getAnalysisFlags());
+            summary.put("cgAlgorithm",   job.getRequest().getCgAlgorithm());
+        }
+
+        // Taint / policy counts
+        summary.put("taintChainsCount",
+            job.getTaintChains() != null ? job.getTaintChains().size() : 0);
+        summary.put("policyViolationsCount",
+            job.getPolicyViolations() != null ? job.getPolicyViolations().size() : 0);
+
+        // Embed taintChains list for risk gauge in frontend
+        if (job.getTaintChains() != null && !job.getTaintChains().isEmpty()) {
+            summary.put("taintChains", job.getTaintChains());
+        }
+        if (job.getPolicyViolations() != null && !job.getPolicyViolations().isEmpty()) {
+            summary.put("policyViolations", job.getPolicyViolations());
+        }
+
         return summary;
     }
 }

@@ -41,17 +41,28 @@ export function JobDetail() {
       .finally(() => setLoadingResult(false));
   }, [jobId]);
 
-  const handleExport = async () => {
+  const handleExport = async (format) => {
     setExporting(true);
     try {
-      const data = await api.exportJob(jobId);
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `sootup_${jobId.slice(0, 8)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const filename = `${targetName(job.targetPath)}_${jobId.slice(0, 8)}_results`;
+      if (format === 'json') {
+        const data = await api.exportJob(jobId);
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${filename}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // Trigger a direct browser file download with content-disposition header
+        const a = document.createElement('a');
+        a.href = `/api/v1/analyses/${jobId}/export?format=${format}`;
+        a.download = `${filename}.${format === 'zip' ? 'zip' : 'html'}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -82,9 +93,6 @@ export function JobDetail() {
     { id: 'godmode',   label: 'God Mode', icon: Terminal },
   ];
 
-
-
-
   return (
     <div style={{ padding: '24px 32px', maxWidth: 1400, flex: 1 }}>
       {/* Header */}
@@ -107,11 +115,16 @@ export function JobDetail() {
             </div>
           </div>
         </div>
-        <Btn variant="subtle" onClick={handleExport} disabled={exporting || job.status !== 'COMPLETED'}>
-          <Download size={14} />
-          {exporting ? 'Exporting…' : 'Export JSON'}
-        </Btn>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['json', 'html', 'zip'].map(fmt => (
+            <Btn key={fmt} variant="subtle" onClick={() => handleExport(fmt)} disabled={exporting || job.status !== 'COMPLETED'}>
+              <Download size={13} />
+              {exporting ? 'Generating…' : `${fmt.toUpperCase()}`}
+            </Btn>
+          ))}
+        </div>
       </div>
+
 
       {/* Progress (if running) */}
       {(job.status === 'RUNNING' || job.status === 'QUEUED') && (

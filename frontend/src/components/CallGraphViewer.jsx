@@ -2,7 +2,62 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import cytoscape from 'cytoscape';
 import { api } from '../api';
 import { EmptyState, Skeleton, Btn, Card } from './ui';
-import { Network, Search, ZoomIn, ZoomOut, Maximize2, GitMerge, AlertOctagon, Loader } from 'lucide-react';
+import { Network, Search, ZoomIn, ZoomOut, Maximize2, GitMerge, AlertOctagon, Loader, Focus, LayoutGrid, X } from 'lucide-react';
+
+/* ── UI-5 Package Treemap ─────────────────────────────────────────── */
+function PackageTreemap({ nodes }) {
+  const pkgMap = {};
+  nodes.forEach(n => {
+    const id = n.data.id || '';
+    const pkg = id.includes('.') ? id.split('.').slice(0, -2).join('.') || 'default' : 'default';
+    if (!pkgMap[pkg]) pkgMap[pkg] = { count: 0, sinks: 0 };
+    pkgMap[pkg].count++;
+    if (n.data.riskCategory) pkgMap[pkg].sinks++;
+  });
+  const pkgs = Object.entries(pkgMap).sort((a, b) => b[1].count - a[1].count);
+  const total = pkgs.reduce((s, [, v]) => s + v.count, 0);
+  if (total === 0) return <div style={{ padding: 20, color: 'var(--text-muted)', fontSize: 12 }}>No package data</div>;
+
+  const PKG_COLORS = ['#6366f1','#8b5cf6','#ec4899','#06b6d4','#34d399','#f59e0b','#f87171','#a78bfa'];
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>Package Treemap — node count by Java package</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {pkgs.slice(0, 24).map(([pkg, info], i) => {
+          const pct = info.count / total;
+          const minW = 60, maxW = 220;
+          const w = Math.max(minW, Math.round(pct * maxW * 3));
+          const color = PKG_COLORS[i % PKG_COLORS.length];
+          return (
+            <div key={pkg} className="treemap-node" title={`${pkg}\n${info.count} nodes · ${info.sinks} sinks`}
+              style={{
+                width: w, minHeight: 52, background: `${color}18`,
+                border: `1px solid ${color}40`,
+                borderLeft: `3px solid ${color}`,
+                borderRadius: 6, padding: '8px 10px',
+                position: 'relative', overflow: 'hidden',
+              }}>
+              <div style={{ fontSize: 10, fontFamily: 'JetBrains Mono', color, wordBreak: 'break-all', lineHeight: 1.3, marginBottom: 4 }}>
+                {pkg.split('.').pop()}
+              </div>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>
+                {info.count} nodes{info.sinks > 0 && <span style={{ color: '#ef4444', marginLeft: 4 }}>· {info.sinks} sinks</span>}
+              </div>
+              {info.sinks > 0 && (
+                <div style={{
+                  position: 'absolute', top: 4, right: 6, width: 6, height: 6,
+                  borderRadius: '50%', background: '#ef4444',
+                  animation: 'liveRing 2s ease-in-out infinite',
+                }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {pkgs.length > 24 && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8 }}>…and {pkgs.length - 24} more packages</div>}
+    </div>
+  );
+}
 
 const NODE_COLORS = ['#7c85ff', '#c084fc', '#34d399', '#f97316', '#06b6d4', '#ec4899'];
 const classColor = (cls) => {
@@ -33,12 +88,29 @@ export function CallGraphViewer({ jobId }) {
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState('');
 
-  // Pathfinding — wired to real backend /paths BFS (Fix 1)
+  // Pathfinding — wired to real backend /paths BFS
   const [sourceNodeId, setSourceNodeId] = useState(null);
   const [targetNodeId, setTargetNodeId] = useState(null);
   const [pathLoading, setPathLoading] = useState(false);
-  const [pathResult, setPathResult] = useState(null); // null | string[] | []
+  const [pathResult, setPathResult] = useState(null);
   const [showDeadCode, setShowDeadCode] = useState(true);
+
+  // UI-3/4/5: view mode
+  const [focusMode, setFocusMode] = useState(false);     // F key
+  const [viewMode, setViewMode] = useState('graph');       // 'graph' | 'treemap'
+
+  // F-key: toggle Focus Mode
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'f' || e.key === 'F') {
+        if (e.target.tagName === 'INPUT') return;
+        setFocusMode(v => !v);
+      }
+      if (e.key === 'Escape') setFocusMode(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   useEffect(() => {
     if (!jobId) return;
@@ -140,6 +212,14 @@ export function CallGraphViewer({ jobId }) {
         padding: 20,
         spacingFactor: 1.4,
       },
+    });
+
+    // UI-3: Cinematic reveal — stagger node opacity in
+    cyInstance.current.nodes().forEach((n, i) => {
+      n.style('opacity', 0);
+      setTimeout(() => {
+        if (n && !n.removed()) n.style('opacity', 1);
+      }, 30 + i * 8);
     });
 
     cyInstance.current.on('tap', 'node', evt => {
@@ -256,8 +336,31 @@ export function CallGraphViewer({ jobId }) {
     <EmptyState icon={Network} title="No call graph data" subtitle="Run an analysis with the callGraph flag enabled." />
   );
 
+  // Treemap view
+  if (viewMode === 'treemap') {
+    return (
+      <div style={{ height: '100%', overflowY: 'auto', position: 'relative' }}>
+        <div style={{ position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg-base)', padding: '10px 16px', borderBottom: '1px solid var(--bg-border)', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Package Treemap</span>
+          <Btn variant="subtle" size="sm" onClick={() => setViewMode('graph')} style={{ marginLeft: 'auto', gap: 4 }}>
+            <Network size={12} /> Back to Graph
+          </Btn>
+        </div>
+        <PackageTreemap nodes={data.nodes} />
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', height: '100%', minHeight: 520, gap: 0 }}>
+    <div style={{ display: 'flex', height: '100%', minHeight: 520, gap: 0, position: 'relative' }}>
+      {/* UI-4: Focus Mode overlay */}
+      {focusMode && (
+        <div className="graph-focus-mode" onClick={() => setFocusMode(false)}>
+          <div style={{ padding: '10px 20px', background: 'rgba(13,13,15,0.95)', border: '1px solid var(--bg-border)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Focus size={13} color="var(--accent)" /> Focus Mode — click graph area to dismiss · press F to toggle
+          </div>
+        </div>
+      )}
       {/* Graph canvas */}
       <div style={{ flex: 1, position: 'relative' }}>
         {/* Toolbar */}
@@ -283,14 +386,17 @@ export function CallGraphViewer({ jobId }) {
           </div>
           <Btn variant="subtle" size="sm" onClick={() => cyInstance.current?.zoom(cyInstance.current.zoom() * 1.2)} title="Zoom in"><ZoomIn size={13} /></Btn>
           <Btn variant="subtle" size="sm" onClick={() => cyInstance.current?.zoom(cyInstance.current.zoom() * 0.8)} title="Zoom out"><ZoomOut size={13} /></Btn>
-          <Btn variant="subtle" size="sm" onClick={() => cyInstance.current?.fit()} title="Fit"><Maximize2 size={13} /></Btn>
-          <Btn
-            variant={showDeadCode ? 'ghost' : 'subtle'}
-            size="sm"
-            onClick={() => setShowDeadCode(v => !v)}
-            title="Toggle dead-code dimming"
-          >
+          <Btn variant="subtle" size="sm" onClick={() => cyInstance.current?.fit()} title="Fit to screen"><Maximize2 size={13} /></Btn>
+          <Btn variant={showDeadCode ? 'ghost' : 'subtle'} size="sm" onClick={() => setShowDeadCode(v => !v)} title="Toggle dead-code dimming">
             {showDeadCode ? 'Dim Dead Code' : 'Show All'}
+          </Btn>
+          {/* UI-4: Focus mode */}
+          <Btn variant={focusMode ? 'primary' : 'subtle'} size="sm" onClick={() => setFocusMode(v => !v)} title="Focus Mode (F)">
+            <Focus size={12} /> Focus
+          </Btn>
+          {/* UI-5: Treemap */}
+          <Btn variant="subtle" size="sm" onClick={() => setViewMode('treemap')} title="Package Treemap">
+            <LayoutGrid size={12} /> Treemap
           </Btn>
           {(sourceNodeId || targetNodeId) && (
             <Btn variant="danger" size="sm" onClick={clearPath}>Clear Path</Btn>
