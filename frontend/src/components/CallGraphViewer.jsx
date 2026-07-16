@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import cytoscape from 'cytoscape';
 import { api } from '../api';
 import { EmptyState, Skeleton, Btn, Card } from './ui';
-import { Network, Search, ZoomIn, ZoomOut, Maximize2, GitMerge, AlertOctagon, HelpCircle } from 'lucide-react';
+import { Network, Search, ZoomIn, ZoomOut, Maximize2, GitMerge, AlertOctagon, Loader } from 'lucide-react';
 
 const NODE_COLORS = ['#7c85ff', '#c084fc', '#34d399', '#f97316', '#06b6d4', '#ec4899'];
 const classColor = (cls) => {
@@ -11,24 +11,18 @@ const classColor = (cls) => {
   return NODE_COLORS[Math.abs(h) % NODE_COLORS.length];
 };
 
-// Check if a method signature is a dangerous security sink
-function isDangerousSink(sig = '') {
-  const s = sig.toLowerCase();
-  return (
-    s.includes('runtime.exec(') ||
-    s.includes('processbuilder') ||
-    s.includes('objectinputstream.readobject(') ||
-    s.includes('method.invoke(') ||
-    s.includes('statement.execute') ||
-    s.includes('connection.preparestatement(') ||
-    s.includes('classloader.defineclass(') ||
-    s.includes('system.load(') ||
-    s.includes('system.loadlibrary(') ||
-    s.includes('xml') ||
-    s.includes('xpath') ||
-    s.includes('lookup(')
-  );
-}
+// Risk category → color mapping (server-driven, from sinks.yaml via API)
+const RISK_COLORS = {
+  COMMAND_INJECTION:       '#ef4444',
+  INSECURE_DESERIALIZATION:'#f97316',
+  REFLECTION:              '#eab308',
+  SQL_INJECTION:           '#ef4444',
+  NATIVE_CODE_LOAD:        '#f97316',
+  JNDI_INJECTION:          '#ef4444',
+  XML_INJECTION:           '#eab308',
+  WEAK_CRYPTO:             '#a78bfa',
+  CODE_INJECTION:          '#ef4444',
+};
 
 export function CallGraphViewer({ jobId }) {
   const cyRef = useRef(null);
@@ -39,10 +33,12 @@ export function CallGraphViewer({ jobId }) {
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState('');
 
-  // Pathfinding states
+  // Pathfinding — wired to real backend /paths BFS (Fix 1)
   const [sourceNodeId, setSourceNodeId] = useState(null);
   const [targetNodeId, setTargetNodeId] = useState(null);
-  const [pathFound, setPathFound] = useState(false);
+  const [pathLoading, setPathLoading] = useState(false);
+  const [pathResult, setPathResult] = useState(null); // null | string[] | []
+  const [showDeadCode, setShowDeadCode] = useState(true);
 
   useEffect(() => {
     if (!jobId) return;
@@ -58,14 +54,19 @@ export function CallGraphViewer({ jobId }) {
 
     const elements = [
       ...data.nodes.map(n => {
-        const isSink = isDangerousSink(n.data.id);
+        // Use server-side riskCategory (Fix 2) — no client-side substring matching
+        const riskCategory = n.data.riskCategory || null;
+        const reachable = n.data.reachableFromEntry !== false; // true if missing (legacy)
+        const sinkColor = riskCategory ? (RISK_COLORS[riskCategory] || '#ef4444') : null;
         return {
           data: {
             id: n.data.id,
             label: n.data.label,
             cls: n.data.class,
-            isSink,
-            color: isSink ? '#ef4444' : classColor(n.data.class),
+            riskCategory,
+            reachable,
+            color: sinkColor || classColor(n.data.class),
+            isSink: !!riskCategory,
           }
         };
       }),
@@ -151,6 +152,8 @@ export function CallGraphViewer({ jobId }) {
         label: node.data('label'),
         cls: node.data('cls'),
         isSink: node.data('isSink'),
+        riskCategory: node.data('riskCategory'),
+        reachable: node.data('reachable'),
         incoming,
         outgoing
       });
@@ -173,52 +176,73 @@ export function CallGraphViewer({ jobId }) {
     });
   }, [search]);
 
-  // Run path-finding when source or target changes
+  // Dead-code dimming toggle (FR-3b) — uses server-side reachableFromEntry flag
   useEffect(() => {
     if (!cyInstance.current) return;
-
-    // Reset styles
-    cyInstance.current.elements().removeClass('highlighted-path');
-    cyInstance.current.elements().style('opacity', 1);
-    setPathFound(false);
-
-    if (sourceNodeId && targetNodeId) {
-      const source = cyInstance.current.getElementById(sourceNodeId);
-      const target = cyInstance.current.getElementById(targetNodeId);
-
-      if (source.length && target.length) {
-        // Run Dijkstra path finding
-        const dijkstra = cyInstance.current.elements().dijkstra({
-          root: source,
-          directed: true
-        });
-
-        const path = dijkstra.pathTo(target);
-        if (path.length > 0) {
-          setPathFound(true);
-          // Highlight elements on path
-          cyInstance.current.elements().style('opacity', 0.15);
-          path.style('opacity', 1);
-          path.nodes().style('border-color', '#f97316').style('border-width', 3);
-          path.edges().style('line-color', '#f97316').style('target-arrow-color', '#f97316').style('width', 2.5);
-        }
+    cyInstance.current.nodes().forEach(n => {
+      if (!showDeadCode && n.data('reachable') === false) {
+        n.style('opacity', 0.12);
+      } else if (!search) {
+        n.style('opacity', 1);
       }
-    }
-  }, [sourceNodeId, targetNodeId]);
+    });
+  }, [showDeadCode, search]);
 
-  const clearPath = () => {
-    setSourceNodeId(null);
-    setTargetNodeId(null);
-    setPathFound(false);
+  // ── Fix 1: Real backend /paths BFS pathfinding ──────────────────────────────
+  const runBackendPath = useCallback(async (src, tgt) => {
+    if (!src || !tgt || !jobId) return;
+    setPathLoading(true);
+    setPathResult(null);
+    // Reset previous highlights
     if (cyInstance.current) {
       cyInstance.current.elements().style('opacity', 1);
       cyInstance.current.nodes().forEach(n => {
-        const isSink = n.data('isSink');
-        n.style('border-color', isSink ? '#ef4444' : n.data('color')).style('border-width', isSink ? 2.5 : 1.5);
+        n.style('border-color', n.data('isSink') ? (RISK_COLORS[n.data('riskCategory')] || '#ef4444') : n.data('color'));
+        n.style('border-width', n.data('isSink') ? 2.5 : 1.5);
       });
       cyInstance.current.edges().style('line-color', '#3a3a4a').style('target-arrow-color', '#3a3a4a').style('width', 1);
     }
-  };
+    try {
+      const path = await api.getShortestPath(jobId, src, tgt);
+      setPathResult(path);
+      if (path.length > 0 && cyInstance.current) {
+        // Dim everything, then highlight the returned path
+        cyInstance.current.elements().style('opacity', 0.12);
+        path.forEach((nodeId, idx) => {
+          const node = cyInstance.current.getElementById(nodeId);
+          if (node.length) node.style('opacity', 1).style('border-color', '#f97316').style('border-width', 3);
+          if (idx < path.length - 1) {
+            const nextId = path[idx + 1];
+            const edge = cyInstance.current.edges(`[source="${nodeId}"][target="${nextId}"]`);
+            if (edge.length) edge.style('opacity', 1).style('line-color', '#f97316').style('target-arrow-color', '#f97316').style('width', 2.5);
+          }
+        });
+      }
+    } catch (e) {
+      setPathResult([]);
+    } finally {
+      setPathLoading(false);
+    }
+  }, [jobId]);
+
+  // Trigger path search whenever both source and target are set
+  useEffect(() => {
+    if (sourceNodeId && targetNodeId) runBackendPath(sourceNodeId, targetNodeId);
+  }, [sourceNodeId, targetNodeId, runBackendPath]);
+
+  const clearPath = useCallback(() => {
+    setSourceNodeId(null);
+    setTargetNodeId(null);
+    setPathResult(null);
+    if (cyInstance.current) {
+      cyInstance.current.elements().style('opacity', 1);
+      cyInstance.current.nodes().forEach(n => {
+        n.style('border-color', n.data('isSink') ? (RISK_COLORS[n.data('riskCategory')] || '#ef4444') : n.data('color'));
+        n.style('border-width', n.data('isSink') ? 2.5 : 1.5);
+      });
+      cyInstance.current.edges().style('line-color', '#3a3a4a').style('target-arrow-color', '#3a3a4a').style('width', 1);
+    }
+  }, []);
 
   if (loading) return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -260,39 +284,49 @@ export function CallGraphViewer({ jobId }) {
           <Btn variant="subtle" size="sm" onClick={() => cyInstance.current?.zoom(cyInstance.current.zoom() * 1.2)} title="Zoom in"><ZoomIn size={13} /></Btn>
           <Btn variant="subtle" size="sm" onClick={() => cyInstance.current?.zoom(cyInstance.current.zoom() * 0.8)} title="Zoom out"><ZoomOut size={13} /></Btn>
           <Btn variant="subtle" size="sm" onClick={() => cyInstance.current?.fit()} title="Fit"><Maximize2 size={13} /></Btn>
-          
+          <Btn
+            variant={showDeadCode ? 'ghost' : 'subtle'}
+            size="sm"
+            onClick={() => setShowDeadCode(v => !v)}
+            title="Toggle dead-code dimming"
+          >
+            {showDeadCode ? 'Dim Dead Code' : 'Show All'}
+          </Btn>
           {(sourceNodeId || targetNodeId) && (
             <Btn variant="danger" size="sm" onClick={clearPath}>Clear Path</Btn>
           )}
         </div>
 
-        {/* Path Indicator Banner */}
+        {/* Path status banner */}
         {sourceNodeId && (
           <div style={{
             position: 'absolute', top: 55, left: 12, zIndex: 10,
-            background: 'rgba(30, 30, 40, 0.9)', border: '1px solid var(--bg-border)',
-            borderRadius: 6, padding: '6px 12px', fontSize: 11, color: 'var(--text-secondary)',
-            display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 300
+            background: 'rgba(20,20,30,0.95)', border: '1px solid var(--bg-border)',
+            borderRadius: 6, padding: '8px 12px', fontSize: 11, color: 'var(--text-secondary)',
+            display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 320,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#34d399' }} />
-              <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#34d399', flexShrink: 0 }} />
+              <span style={{ fontFamily: 'JetBrains Mono', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                 Source: {sourceNodeId.split(':').pop()}
               </span>
             </div>
             {targetNodeId ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444' }} />
-                <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', flexShrink: 0 }} />
+                <span style={{ fontFamily: 'JetBrains Mono', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                   Target: {targetNodeId.split(':').pop()}
                 </span>
               </div>
             ) : (
-              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Select another node and set as "Target" to map path.</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Select another node → "Set as Target" to find attack path.</div>
             )}
-            {sourceNodeId && targetNodeId && (
-              <div style={{ fontWeight: 600, color: pathFound ? '#f97316' : 'var(--status-red)', marginTop: 4 }}>
-                {pathFound ? '✓ Attack path highlighted!' : '✕ No reachable path found'}
+            {pathLoading && <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--status-amber)' }}><Loader size={11} /> Querying backend for shortest path…</div>}
+            {!pathLoading && pathResult !== null && (
+              <div style={{ fontWeight: 600, color: pathResult.length > 0 ? '#f97316' : 'var(--status-red)', marginTop: 2 }}>
+                {pathResult.length > 0
+                  ? `✓ Attack path: ${pathResult.length} hops (server BFS)`
+                  : '✕ No reachable path found'}
               </div>
             )}
           </div>
@@ -306,10 +340,13 @@ export function CallGraphViewer({ jobId }) {
           display: 'flex', gap: 12,
         }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: '#ef4444' }} /> Dangerous Sink
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: '#ef4444' }} /> Sink (server catalog)
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: '#f97316' }} /> Attack Path
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: '#f97316' }} /> Attack Path (backend BFS)
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, opacity: 0.3, background: '#888' }} /> Dead Code
           </span>
         </div>
 
@@ -326,10 +363,18 @@ export function CallGraphViewer({ jobId }) {
             <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Method Detail</div>
             {selected.isSink && (
               <div style={{
-                background: 'var(--status-red-bg)', color: 'var(--status-red)', borderRadius: 6,
+                background: 'rgba(239,68,68,0.12)', color: '#ef4444', borderRadius: 6,
                 padding: '6px 10px', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10
               }}>
-                <AlertOctagon size={13} /> DANGEROUS SINK DETECTED
+                <AlertOctagon size={13} /> {selected.riskCategory || 'DANGEROUS SINK'}
+              </div>
+            )}
+            {selected.reachable === false && (
+              <div style={{
+                background: 'rgba(100,100,120,0.15)', color: 'var(--text-muted)', borderRadius: 6,
+                padding: '6px 10px', fontSize: 11, marginBottom: 10
+              }}>
+                ⚠ Unreachable from entry point (dead code)
               </div>
             )}
             <div style={{

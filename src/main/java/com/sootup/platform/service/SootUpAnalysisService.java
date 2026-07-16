@@ -2,6 +2,8 @@ package com.sootup.platform.service;
 
 import com.sootup.platform.dto.GraphResponse;
 import com.sootup.platform.model.AnalysisJob;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -16,7 +18,6 @@ import sootup.core.IdentifierFactory;
 import sootup.java.bytecode.inputlocation.JrtFileSystemAnalysisInputLocation;
 import sootup.java.bytecode.inputlocation.DefaultRTJarAnalysisInputLocation;
 import sootup.java.bytecode.inputlocation.PathBasedAnalysisInputLocation;
-import sootup.java.core.language.JavaLanguage;
 import sootup.java.core.views.JavaView;
 import sootup.java.core.JavaSootClass;
 import sootup.callgraph.CallGraph;
@@ -24,7 +25,11 @@ import sootup.callgraph.CallGraphAlgorithm;
 import sootup.callgraph.ClassHierarchyAnalysisAlgorithm;
 import sootup.callgraph.RapidTypeAnalysisAlgorithm;
 
+import jakarta.annotation.PostConstruct;
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
@@ -34,7 +39,47 @@ import java.util.concurrent.CompletableFuture;
 @Service
 public class SootUpAnalysisService {
 
+    private static final Logger log = LoggerFactory.getLogger(SootUpAnalysisService.class);
     private final ConcurrentHashMap<String, CompletableFuture<?>> runningTasks = new ConcurrentHashMap<>();
+
+    // Sink catalog: loaded once from sinks.yaml at startup.
+    // Key = pattern string, Value = riskCategory label.
+    // NOTE: JobStore is in-memory (MVP). Jobs are lost on restart and cannot
+    //       survive multiple backend instances. Migrate to a persistent store
+    //       (e.g. PostgreSQL via Spring Data JPA) before production deployment.
+    private final Map<String, String> sinkCatalog = new LinkedHashMap<>();
+
+    @PostConstruct
+    public void loadSinkCatalog() {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream("sinks.yaml")) {
+            if (is == null) { log.warn("sinks.yaml not found on classpath — sink detection disabled."); return; }
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
+                String line;
+                String currentPattern = null;
+                while ((line = br.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("- pattern:")) {
+                        currentPattern = line.substring("- pattern:".length()).trim().replaceAll("^\"|\"$", "");
+                    } else if (line.startsWith("riskCategory:") && currentPattern != null) {
+                        String category = line.substring("riskCategory:".length()).trim().replaceAll("^\"|\"$", "");
+                        sinkCatalog.put(currentPattern, category);
+                        currentPattern = null;
+                    }
+                }
+            }
+            log.info("Loaded {} sink patterns from sinks.yaml", sinkCatalog.size());
+        } catch (Exception e) {
+            log.error("Failed to load sinks.yaml: {}", e.getMessage());
+        }
+    }
+
+    /** Returns the riskCategory if the method signature matches a known sink, else null. */
+    private String matchSink(String methodSig) {
+        for (Map.Entry<String, String> entry : sinkCatalog.entrySet()) {
+            if (methodSig.contains(entry.getKey())) return entry.getValue();
+        }
+        return null;
+    }
 
     @Async("analysisTaskExecutor")
     public void runAnalysis(AnalysisJob job) {
@@ -329,21 +374,22 @@ public class SootUpAnalysisService {
     }
 
     private GraphResponse convertCallGraphToResponse(CallGraph callGraph, List<MethodSignature> entryPoints) {
+        // ── Phase 1: BFS to discover all reachable nodes/edges ──────────────────
         Queue<MethodSignature> queue = new LinkedList<>(entryPoints);
         Set<MethodSignature> visited = new HashSet<>(entryPoints);
+        // reachableFromEntry: BFS-reachable set (FR-3b)
+        Set<String> reachableIds = new HashSet<>();
         List<GraphResponse.Node> nodes = new ArrayList<>();
         List<GraphResponse.Edge> edges = new ArrayList<>();
 
+        // Seed entry-point nodes
         for (MethodSignature entry : entryPoints) {
-            Map<String, Object> data = new HashMap<>();
-            data.put("id", entry.toString());
-            data.put("label", entry.getName());
-            data.put("class", entry.getDeclClassType().toString()); // Use getDeclClassType()
-            nodes.add(new GraphResponse.Node(data));
+            reachableIds.add(entry.toString());
         }
 
         while (!queue.isEmpty()) {
             MethodSignature current = queue.poll();
+            reachableIds.add(current.toString());
             Collection<MethodSignature> callees = callGraph.callsFrom(current);
             for (MethodSignature callee : callees) {
                 String edgeId = current.toString() + "->" + callee.toString();
@@ -354,15 +400,28 @@ public class SootUpAnalysisService {
                 edges.add(new GraphResponse.Edge(edgeData));
 
                 if (visited.add(callee)) {
-                    Map<String, Object> nodeData = new HashMap<>();
-                    nodeData.put("id", callee.toString());
-                    nodeData.put("label", callee.getName());
-                    nodeData.put("class", callee.getDeclClassType().toString()); // Use getDeclClassType()
-                    nodes.add(new GraphResponse.Node(nodeData));
-                    
+                    reachableIds.add(callee.toString());
                     queue.add(callee);
                 }
             }
+        }
+
+        // ── Phase 2: Build nodes with riskCategory + reachableFromEntry tags ────
+        for (MethodSignature sig : visited) {
+            String sigStr = sig.toString();
+            Map<String, Object> nodeData = new HashMap<>();
+            nodeData.put("id", sigStr);
+            nodeData.put("label", sig.getName());
+            nodeData.put("class", sig.getDeclClassType().toString());
+            nodeData.put("reachableFromEntry", reachableIds.contains(sigStr));
+
+            // Server-side sink detection from configurable catalog (FR-3a)
+            String riskCategory = matchSink(sigStr);
+            if (riskCategory != null) {
+                nodeData.put("riskCategory", riskCategory);
+            }
+
+            nodes.add(new GraphResponse.Node(nodeData));
         }
 
         return new GraphResponse(nodes, edges);

@@ -72,4 +72,14 @@ export const api = {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   },
+
+  // Get shortest call-graph path between two method signatures (Fix 1).
+  // Calls the real backend BFS over the full graph — not limited to paginated client data.
+  getShortestPath: async (jobId, from, to) => {
+    const params = new URLSearchParams({ from, to });
+    const res = await fetch(`${BASE}/${jobId}/paths?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json(); // returns string[] — ordered list of method IDs on the path
+  },
 };
+
