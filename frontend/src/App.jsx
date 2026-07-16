@@ -183,38 +183,48 @@ function AppShell() {
 
   return (
     <div className="app-container">
-      {/* Mobile Top Bar */}
+
+      {/* Mobile Top Bar — CSS shows this on ≤768px, hides on desktop */}
       <div className="mobile-topbar" style={{
-        display: 'none', alignItems: 'center', justifyContent: 'space-between',
-        padding: '12px 16px', background: 'var(--bg-surface)',
-        borderBottom: '1px solid var(--bg-border)', width: '100%',
+        alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 16px', background: 'var(--bg-surface)',
+        borderBottom: '1px solid var(--bg-border)',
+        width: '100%', boxSizing: 'border-box',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <FlaskConical size={16} color="var(--accent)" />
-          <span style={{ fontSize: 13, fontWeight: 700 }}>SootUp</span>
+          <div style={{
+            width: 26, height: 26, background: 'var(--accent-subtle)',
+            border: '1px solid rgba(0,255,102,0.3)', borderRadius: 6,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <FlaskConical size={14} color="var(--accent)" />
+          </div>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>SootUp</span>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 2 }}>Analysis Platform</span>
         </div>
-        <button 
+        <button
           onClick={() => setMobileMenuOpen(true)}
-          style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer' }}
+          style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', padding: 6 }}
         >
           <Menu size={20} />
         </button>
       </div>
 
       <div className="app-box">
-        {/* Sidebar wrapper to handle mobile overlay */}
+        {/* Backdrop overlay when sidebar open on mobile */}
         {mobileMenuOpen && (
-          <div 
+          <div
             onClick={() => setMobileMenuOpen(false)}
             style={{
               position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
-              backdropFilter: 'blur(4px)', zIndex: 100,
+              backdropFilter: 'blur(3px)', zIndex: 999,
             }}
           />
         )}
+
         <Sidebar mobileOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
-        
-        <main style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+
+        <main style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', position: 'relative', minWidth: 0 }}>
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'auto' }} className="page-transition">
             <Routes>
               <Route path="/"            element={<WelcomeScreen />} />

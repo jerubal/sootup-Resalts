@@ -43,8 +43,10 @@ body {
 }
 
 /* ── Layout ────────────────────────────────────────────────────────────── */
+/* ── Desktop layout ────────────────────────────────────────────────────── */
 .app-container {
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
@@ -57,12 +59,6 @@ body {
   box-sizing: border-box;
 }
 
-@media (max-width: 768px) {
-  .app-container {
-    padding: 0;
-  }
-}
-
 .app-box {
   width: 100%;
   max-width: 1360px;
@@ -73,16 +69,61 @@ body {
   border-radius: 16px;
   box-shadow: 0 20px 50px -12px rgba(0,0,0,0.85), 0 0 40px 0 rgba(0,255,102,0.01);
   display: flex;
+  flex-direction: row;
   overflow: hidden;
   position: relative;
 }
 
+/* ── Mobile Topbar (hidden on desktop) ──────────────────────────────────── */
+.mobile-topbar {
+  display: none;
+}
+
+/* ── Mobile layout ─────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .app-box {
-    flex-direction: column;
+  body {
+    overflow: auto;
+  }
+
+  .app-container {
+    padding: 0;
+    justify-content: flex-start;
+    align-items: stretch;
+    min-height: 100vh;
     height: 100vh;
+  }
+
+  .mobile-topbar {
+    display: flex !important;
+    flex-shrink: 0;
+    height: 52px;
+    z-index: 50;
+  }
+
+  .app-box {
+    flex: 1;
+    height: calc(100vh - 52px);
+    min-height: 0;
     border-radius: 0;
     border: none;
+    max-width: 100%;
+    box-shadow: none;
+    overflow: auto;
+  }
+
+  /* Sidebar hidden off-screen by default on mobile */
+  .sidebar-nav {
+    position: fixed !important;
+    top: 0; left: 0; bottom: 0;
+    z-index: 1000;
+    transform: translateX(-100%);
+    box-shadow: 4px 0 30px rgba(0,0,0,0.8);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    width: 260px !important;
+  }
+
+  .sidebar-nav.mobile-open {
+    transform: translateX(0);
   }
 }
 
@@ -169,22 +210,8 @@ code, .mono {
 ::-webkit-scrollbar-thumb  { background: var(--bg-border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #3a3a3f; }
 
-/* ── Mobile Layout Overlay ────────────────────────────────────────────── */
-@media (max-width: 768px) {
-  .sidebar-nav {
-    position: fixed !important;
-    top: 0; bottom: 0; left: 0;
-    z-index: 1000;
-    transform: translateX(-100%);
-    box-shadow: 20px 0 30px rgba(0,0,0,0.8);
-  }
-  .sidebar-nav.mobile-open {
-    transform: translateX(0);
-  }
-  .mobile-topbar {
-    display: flex !important;
-  }
-}
+
+
 
 /* ── Tailwind tokens ──────────────────────────────────────────────────── */
 @theme {
