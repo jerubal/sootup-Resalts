@@ -139,7 +139,7 @@ export function WelcomeScreen() {
     <div style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       justifyContent: 'flex-start', minHeight: '100%', overflowY: 'auto',
-      padding: '40px 24px 32px', background: 'var(--bg-base)',
+      padding: '24px 16px 32px', background: 'var(--bg-base)', boxSizing: 'border-box',
     }}>
       {/* Hero / Logo */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 36 }}>
@@ -170,7 +170,7 @@ export function WelcomeScreen() {
       {/* Tab bar */}
       <div style={{ width: '100%', maxWidth: 760 }}>
         <div style={{
-          display: 'flex', gap: 2, background: 'var(--bg-elevated)',
+          display: 'flex', flexWrap: 'wrap', gap: 2, background: 'var(--bg-elevated)',
           borderRadius: 10, padding: 4, border: '1px solid var(--bg-border)',
           marginBottom: 20,
         }}>

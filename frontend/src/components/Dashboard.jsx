@@ -138,7 +138,7 @@ function StatsRow({ jobs }) {
   ];
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 20 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 20 }}>
       {stats.map(s => (
         <div key={s.label} style={{
           background: 'var(--bg-elevated)', border: '1px solid var(--bg-border)',
@@ -165,7 +165,7 @@ export function Dashboard() {
   const filtered = filter === 'all' ? jobs : jobs.filter(j => j.status === filter.toUpperCase());
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1200, overflowY: 'auto', height: '100%' }}>
+    <div style={{ padding: '16px 20px', maxWidth: 1200, overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
       <SectionHeader
         title="Analysis Jobs"
         subtitle="Static bytecode analysis results from SootUp"
@@ -219,7 +219,8 @@ export function Dashboard() {
         />
       ) : (
         <Card>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div style={{ overflowX: 'auto', width: '100%' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 600 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--bg-border)' }}>
                 {['Target','Status','Progress','Submitted','Duration','Flags','Actions'].map(col => (
@@ -304,8 +305,9 @@ export function Dashboard() {
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
     </div>

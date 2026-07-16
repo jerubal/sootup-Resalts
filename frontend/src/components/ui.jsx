@@ -70,7 +70,7 @@ export function SectionHeader({ title, subtitle, actions }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-      marginBottom: 20,
+      marginBottom: 20, flexWrap: 'wrap', gap: 12,
     }}>
       <div>
         <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>{title}</h2>
