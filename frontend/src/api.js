@@ -88,6 +88,15 @@ export const api = {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   },
+
+  // Diff two completed analysis jobs (FR-F)
+  diffJobs: async (jobId1, jobId2) => {
+    const params = new URLSearchParams({ jobId1, jobId2 });
+    const res = await fetch(`${BASE}/diff?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
 };
+
 
 

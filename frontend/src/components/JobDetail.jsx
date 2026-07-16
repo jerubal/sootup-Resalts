@@ -8,7 +8,9 @@ import { CfgViewer } from './CfgViewer';
 import { JimpleBrowser } from './JimpleBrowser';
 import { TaintViewer } from './TaintViewer';
 import { CrossRefViewer } from './CrossRefViewer';
-import { Network, GitBranch, Code2, Download, Cpu, Box, ArrowLeft, AlertCircle, ShieldAlert, FileSearch } from 'lucide-react';
+import { PentestReportGenerator } from './PentestReportGenerator';
+import { Network, GitBranch, Code2, Download, Cpu, Box, ArrowLeft, AlertCircle, ShieldAlert, FileSearch, FileText } from 'lucide-react';
+
 
 
 
@@ -74,7 +76,9 @@ export function JobDetail() {
     { id: 'jimple',    label: 'Jimple IR', icon: Code2 },
     { id: 'taint',     label: 'Taint Analysis', icon: ShieldAlert },
     { id: 'crossref',  label: 'MobSF Cross-Ref', icon: FileSearch },
+    { id: 'report',    label: 'Audit Report', icon: FileText },
   ];
+
 
 
   return (
@@ -184,6 +188,8 @@ export function JobDetail() {
                 }}
               />
             )}
+            {tab === 'report' && <PentestReportGenerator jobId={jobId} />}
+
 
           </div>
         </Card>

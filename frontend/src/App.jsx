@@ -5,8 +5,10 @@ import { Dashboard } from './components/Dashboard';
 import { NewAnalysisForm } from './components/NewAnalysisForm';
 import { JobDetail } from './components/JobDetail';
 import { MobSFViewer } from './components/MobSFViewer';
-import { LayoutGrid, PlusCircle, FlaskConical, ShieldAlert } from 'lucide-react';
+import { DiffViewer } from './components/DiffViewer';
+import { LayoutGrid, PlusCircle, FlaskConical, ShieldAlert, GitCompare } from 'lucide-react';
 import './index.css';
+
 
 function Sidebar() {
   const navStyle = (isActive) => ({
@@ -58,6 +60,10 @@ function Sidebar() {
           <ShieldAlert size={14} />
           MobSF Report
         </NavLink>
+        <NavLink to="/diff" style={({ isActive }) => navStyle(isActive)}>
+          <GitCompare size={14} />
+          Scan Diffing
+        </NavLink>
       </div>
 
       {/* Footer */}
@@ -78,9 +84,11 @@ function AppShell() {
           <Route path="/new" element={<NewAnalysisForm />} />
           <Route path="/job/:jobId" element={<JobDetail />} />
           <Route path="/mobsf" element={<MobSFViewer />} />
+          <Route path="/diff" element={<DiffViewer />} />
         </Routes>
       </main>
     </div>
+
   );
 }
 

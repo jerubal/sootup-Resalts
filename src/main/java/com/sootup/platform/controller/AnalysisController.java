@@ -272,7 +272,72 @@ public class AnalysisController {
     }
 
 
+    @GetMapping("/diff")
+    public ResponseEntity<Map<String, Object>> diffAnalyses(
+            @RequestParam String jobId1,
+            @RequestParam String jobId2) {
+
+        AnalysisJob job1 = jobStore.get(jobId1)
+                .orElseThrow(() -> new NoSuchElementException("Job not found: " + jobId1));
+        AnalysisJob job2 = jobStore.get(jobId2)
+                .orElseThrow(() -> new NoSuchElementException("Job not found: " + jobId2));
+
+        if (job1.getStatus() != AnalysisJob.Status.COMPLETED || job2.getStatus() != AnalysisJob.Status.COMPLETED) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", "Both jobs must be COMPLETED to perform a diff"));
+        }
+
+        // Diff classes
+        Set<String> classes1 = new HashSet<>(job1.getLoadedClasses());
+        Set<String> classes2 = new HashSet<>(job2.getLoadedClasses());
+
+        Set<String> addedClasses = new HashSet<>(classes2);
+        addedClasses.removeAll(classes1);
+
+        Set<String> removedClasses = new HashSet<>(classes1);
+        removedClasses.removeAll(classes2);
+
+        // Diff methods
+        Set<String> methods1 = job1.getMethodJimpleMap().keySet();
+        Set<String> methods2 = job2.getMethodJimpleMap().keySet();
+
+        Set<String> addedMethods = new HashSet<>(methods2);
+        addedMethods.removeAll(methods1);
+
+        Set<String> removedMethods = new HashSet<>(methods1);
+        removedMethods.removeAll(methods2);
+
+        // Diff taint chains
+        if (job1.getTaintChains() == null) {
+            job1.setTaintChains(analysisService.computeTaintChains(job1));
+        }
+        if (job2.getTaintChains() == null) {
+            job2.setTaintChains(analysisService.computeTaintChains(job2));
+        }
+
+        Set<String> taintSinks1 = job1.getTaintChains().stream().map(c -> c.getSink()).collect(Collectors.toSet());
+        Set<String> taintSinks2 = job2.getTaintChains().stream().map(c -> c.getSink()).collect(Collectors.toSet());
+
+        Set<String> newTaintSinks = new HashSet<>(taintSinks2);
+        newTaintSinks.removeAll(taintSinks1);
+
+        Set<String> resolvedTaintSinks = new HashSet<>(taintSinks1);
+        resolvedTaintSinks.removeAll(taintSinks2);
+
+        Map<String, Object> diff = new HashMap<>();
+        diff.put("jobId1", jobId1);
+        diff.put("jobId2", jobId2);
+        diff.put("addedClasses", addedClasses);
+        diff.put("removedClasses", removedClasses);
+        diff.put("addedMethods", addedMethods);
+        diff.put("removedMethods", removedMethods);
+        diff.put("newTaintSinks", newTaintSinks);
+        diff.put("resolvedTaintSinks", resolvedTaintSinks);
+
+        return ResponseEntity.ok(diff);
+    }
+
     @GetMapping("/{jobId}/export")
+
     public ResponseEntity<Map<String, Object>> exportResults(@PathVariable String jobId) {
         AnalysisJob job = jobStore.get(jobId)
                 .orElseThrow(() -> new NoSuchElementException("Job not found: " + jobId));
