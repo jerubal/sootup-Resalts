@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api';
 import { Card, EmptyState, Btn, Skeleton } from './ui';
-import { ShieldAlert, GitFork, ArrowRight, Activity, Server, AlertCircle } from 'lucide-react';
+import { ShieldAlert, GitFork, ArrowRight, Activity, Server, AlertCircle, Play, Pause, SkipForward, SkipBack, RotateCcw } from 'lucide-react';
 
 export function TaintViewer({ jobId, onSelectPath }) {
   const [chains, setChains] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedChain, setSelectedChain] = useState(null);
+  const [playbackState, setPlaybackState] = useState('stopped'); // 'stopped', 'playing', 'paused'
+  const [currentHopIndex, setCurrentHopIndex] = useState(0);
 
   useEffect(() => {
     if (!jobId) return;
@@ -21,6 +23,29 @@ export function TaintViewer({ jobId, onSelectPath }) {
       })
       .finally(() => setLoading(false));
   }, [jobId]);
+
+  useEffect(() => {
+    let interval;
+    if (playbackState === 'playing' && selectedChain !== null && chains) {
+      interval = setInterval(() => {
+        setCurrentHopIndex(prev => {
+          const max = chains[selectedChain].path.length - 1;
+          if (prev >= max) {
+            setPlaybackState('stopped');
+            return max;
+          }
+          return prev + 1;
+        });
+      }, 1500);
+    }
+    return () => clearInterval(interval);
+  }, [playbackState, selectedChain, chains]);
+
+  const handleSelectChain = (index) => {
+    setSelectedChain(index);
+    setPlaybackState('stopped');
+    setCurrentHopIndex(0);
+  };
 
   if (loading) return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -60,7 +85,7 @@ export function TaintViewer({ jobId, onSelectPath }) {
             return (
               <button
                 key={index}
-                onClick={() => setSelectedChain(index)}
+                onClick={() => handleSelectChain(index)}
                 style={{
                   background: isSelected ? 'var(--bg-elevated)' : 'transparent',
                   border: `1px solid ${isSelected ? 'var(--bg-border)' : 'transparent'}`,
@@ -118,13 +143,50 @@ export function TaintViewer({ jobId, onSelectPath }) {
               </div>
             </div>
 
+            {/* Playback Controls */}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', background: 'var(--bg-elevated)', padding: '10px 16px', borderRadius: 8, border: '1px solid var(--bg-border)', marginBottom: 20 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', marginRight: 10 }}>Playback</span>
+              <Btn variant={playbackState === 'playing' ? 'primary' : 'subtle'} onClick={() => {
+                if (playbackState === 'playing') {
+                  setPlaybackState('paused');
+                } else {
+                  if (currentHopIndex >= chains[selectedChain].path.length - 1) setCurrentHopIndex(0);
+                  setPlaybackState('playing');
+                }
+              }}>
+                {playbackState === 'playing' ? <Pause size={14} /> : <Play size={14} />}
+                {playbackState === 'playing' ? 'Pause' : 'Play'}
+              </Btn>
+              <Btn variant="subtle" onClick={() => setCurrentHopIndex(Math.max(0, currentHopIndex - 1))} disabled={currentHopIndex === 0}>
+                <SkipBack size={14} />
+              </Btn>
+              <Btn variant="subtle" onClick={() => setCurrentHopIndex(Math.min(chains[selectedChain].path.length - 1, currentHopIndex + 1))} disabled={currentHopIndex >= chains[selectedChain].path.length - 1}>
+                <SkipForward size={14} />
+              </Btn>
+              <Btn variant="subtle" onClick={() => { setPlaybackState('stopped'); setCurrentHopIndex(0); }}>
+                <RotateCcw size={14} /> Reset
+              </Btn>
+              
+              <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--accent)', fontFamily: 'JetBrains Mono' }}>
+                Hop {currentHopIndex + 1} / {chains[selectedChain].path.length}
+              </div>
+            </div>
+
             {/* Path flow items */}
-            <div style={{ borderLeft: '2px solid var(--bg-border)', marginLeft: 16, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ borderLeft: '2px solid var(--bg-border)', marginLeft: 16, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 16, position: 'relative' }}>
               {chains[selectedChain].path.map((node, i) => {
                 const isStart = i === 0;
                 const isEnd = i === chains[selectedChain].path.length - 1;
+                const isActive = playbackState !== 'stopped' && i === currentHopIndex;
+                const isFuture = playbackState !== 'stopped' && i > currentHopIndex;
+
                 return (
-                  <div key={i} style={{ position: 'relative' }}>
+                  <div key={i} style={{ 
+                    position: 'relative',
+                    opacity: isFuture ? 0.3 : 1,
+                    transform: isActive ? 'scale(1.02)' : 'scale(1)',
+                    transition: 'all 0.3s ease'
+                  }}>
                     <span style={{
                       position: 'absolute',
                       left: -26,
@@ -133,11 +195,26 @@ export function TaintViewer({ jobId, onSelectPath }) {
                       height: 10,
                       borderRadius: '50%',
                       background: isStart ? '#34d399' : isEnd ? '#ef4444' : 'var(--accent)',
-                      border: '2px solid var(--bg-surface)'
+                      border: '2px solid var(--bg-surface)',
+                      boxShadow: isActive ? '0 0 10px var(--accent)' : 'none',
+                      transition: 'box-shadow 0.3s ease'
                     }} />
+                    {isActive && (
+                      <div style={{
+                        position: 'absolute',
+                        left: -40,
+                        top: 2,
+                        width: 14,
+                        height: 14,
+                        background: 'var(--accent)',
+                        borderRadius: '50%',
+                        animation: 'pulse 1.5s infinite',
+                        zIndex: 10
+                      }} />
+                    )}
                     <div style={{
-                      background: 'var(--bg-elevated)',
-                      border: '1px solid var(--bg-border)',
+                      background: isActive ? 'rgba(99,102,241,0.1)' : 'var(--bg-elevated)',
+                      border: `1px solid ${isActive ? 'var(--accent)' : 'var(--bg-border)'}`,
                       borderRadius: 6,
                       padding: '10px 14px',
                       display: 'flex',
@@ -149,6 +226,7 @@ export function TaintViewer({ jobId, onSelectPath }) {
                       </div>
                       {isStart && <span style={{ fontSize: 9, color: '#34d399', fontWeight: 600 }}>SOURCE ENTRY</span>}
                       {isEnd && <span style={{ fontSize: 9, color: '#ef4444', fontWeight: 600 }}>SINK ARRIVAL</span>}
+                      {isActive && !isStart && !isEnd && <span style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 600 }}>TAINT PAYLOAD</span>}
                     </div>
                   </div>
                 );
