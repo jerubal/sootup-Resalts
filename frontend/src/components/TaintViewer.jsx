@@ -111,9 +111,21 @@ export function TaintViewer({ jobId, onSelectPath }) {
                   }}>
                     {chain.sinkRiskCategory}
                   </span>
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                    {chain.hopCount} {chain.hopCount === 1 ? 'hop' : 'hops'}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {chain.confidence && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                        background: chain.confidence === 'high' ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)',
+                        color: chain.confidence === 'high' ? '#22c55e' : '#f59e0b',
+                        border: `1px solid ${chain.confidence === 'high' ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                      }}>
+                        {chain.confidence === 'high' ? '● HIGH' : '◑ MED'}
+                      </span>
+                    )}
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      {chain.hopCount} {chain.hopCount === 1 ? 'hop' : 'hops'}
+                    </span>
+                  </div>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-primary)', wordBreak: 'break-all', fontFamily: 'JetBrains Mono, monospace' }}>
                   Source: {chain.source.split(':').pop()?.replace('>', '')}
@@ -140,6 +152,23 @@ export function TaintViewer({ jobId, onSelectPath }) {
           <div>
             {/* Header info */}
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' }}>
+              {/* Confidence badge in detail pane */}
+              {chains[selectedChain].confidence && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+                  background: chains[selectedChain].confidence === 'high' ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)',
+                  border: `1px solid ${chains[selectedChain].confidence === 'high' ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
+                  borderRadius: 8, padding: '8px 14px',
+                }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Confidence</span>
+                  <span style={{
+                    fontSize: 13, fontWeight: 700,
+                    color: chains[selectedChain].confidence === 'high' ? '#22c55e' : '#f59e0b',
+                  }}>
+                    {chains[selectedChain].confidence.toUpperCase()}
+                  </span>
+                </div>
+              )}
               <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Taint Source</span>
                 <span style={{ fontSize: 12, fontFamily: 'JetBrains Mono', color: 'var(--text-primary)' }}>{chains[selectedChain].source}</span>

@@ -19,7 +19,7 @@ public class AnalysisRequest {
     private Set<String> analysisFlags = Set.of("callGraph", "cfg", "jimple");
 
     @NotNull(message = "cgAlgorithm must not be null")
-    private String cgAlgorithm = "CHA"; // CHA or RTA
+    private String cgAlgorithm = "CHA"; // CHA, RTA, or QILIN
 
     // Getters and Setters
     public String getTargetPath() {
