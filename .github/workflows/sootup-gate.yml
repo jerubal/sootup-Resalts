@@ -22,11 +22,16 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Set up Maven
+        uses: stCarolas/setup-maven@v5
+        with:
+          maven-version: 3.9.6
+
       - name: Build Target Application
         run: |
-          # Build target jar/classes to scan
-          ./mvnw clean package -DskipTests
-        # If your target is built differently or is in a subdirectory, modify accordingly
+          mvn clean package -DskipTests -B
+        env:
+          MAVEN_OPTS: "-Xmx1024m -XX:MaxMetaspaceSize=512m"
 
       - name: Start SootUp Platform Backend
         run: |
