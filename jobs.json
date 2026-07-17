@@ -1,0 +1,24 @@
+[ {
+  "jobId" : "83980a7d-eb9e-4827-b1c1-6d69a0746422",
+  "status" : "FAILED",
+  "request" : {
+    "targetPath" : "C:\\Issuing CA Portal\\Sootup resalts\\sample",
+    "entryPoints" : [ "sample.HelloWorld" ],
+    "bytecodeVersion" : 17,
+    "analysisFlags" : [ "callGraph", "cfg", "jimple" ],
+    "cgAlgorithm" : "CHA"
+  },
+  "progress" : 30,
+  "message" : "Analysis failed: Workflow failed at step 'Call Graph Generation': No valid entry points could be resolved from: [sample.HelloWorld]",
+  "createdAt" : 1784306727576,
+  "completedAt" : 1784306731491,
+  "loadedClasses" : [ ],
+  "methodJimpleMap" : { },
+  "methodCfgMap" : { },
+  "callGraph" : null,
+  "methodCount" : 0,
+  "edgeCount" : 0,
+  "taintChains" : null,
+  "policyViolations" : [ ],
+  "externalVulnerabilities" : [ ]
+} ]

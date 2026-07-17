@@ -193,7 +193,7 @@ function QueryConsole({ jobId }) {
 }
 
 /* ─── GM-2 Live Catalog Editor ──────────────────────────────────────── */
-function LiveCatalogEditor() {
+function LiveCatalogEditor({ dangerMode, dangerConfirm }) {
   const [sinks, setSinks] = useState([
     { pattern: 'Runtime.exec(', riskCategory: 'COMMAND_INJECTION' },
     { pattern: 'ProcessBuilder', riskCategory: 'COMMAND_INJECTION' },
@@ -205,6 +205,15 @@ function LiveCatalogEditor() {
   const [newCategory, setNewCategory] = useState('COMMAND_INJECTION');
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    api.get('/admin/sink-catalog')
+      .then(res => {
+        if (res && res.rules) setSinks(res.rules);
+      })
+      .catch(() => { /* fallback to hardcoded initial state */ });
+  }, []);
 
   const addSink = () => {
     if (!newPattern.trim()) return;
@@ -216,12 +225,20 @@ function LiveCatalogEditor() {
   const removeSink = (idx) => { setSinks(prev => prev.filter((_, i) => i !== idx)); setSaved(false); };
 
   const pushToServer = async () => {
+    if (!dangerMode || dangerConfirm !== 'confirm') {
+      setErrorMsg('Danger Mode must be unlocked first.');
+      return;
+    }
     setSaving(true);
+    setErrorMsg('');
     try {
-      await api.put('/admin/sink-catalog', { rules: sinks });
+      const opts = { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Danger-Mode': 'confirmed' }, body: JSON.stringify({ rules: sinks }) };
+      const API_HOST = import.meta.env.VITE_API_URL || '';
+      const res = await fetch(`${API_HOST}/api/v1/admin/sink-catalog`, opts);
+      if (!res.ok) throw new Error('Failed to save');
       setSaved(true);
     } catch {
-      // ignore — offline
+      setErrorMsg('Sync failed.');
     } finally {
       setSaving(false);
     }
@@ -274,7 +291,11 @@ function LiveCatalogEditor() {
       </div>
 
       {/* Sync */}
-      <Btn variant="primary" onClick={pushToServer} style={{ marginTop: 10, gap: 6, justifyContent: 'center' }}>
+      {errorMsg && <div style={{ fontSize: 10, color: '#ef4444', textAlign: 'center', marginTop: 8 }}>{errorMsg}</div>}
+      <Btn variant={dangerMode && dangerConfirm === 'confirm' ? 'primary' : 'subtle'} 
+           onClick={pushToServer} 
+           disabled={!dangerMode || dangerConfirm !== 'confirm'}
+           style={{ marginTop: 10, gap: 6, justifyContent: 'center' }}>
         {saving ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={12} />}
         {saving ? 'Syncing…' : 'Hot-Sync to Engine'}
       </Btn>
@@ -448,7 +469,8 @@ export function GodModeConsole({ jobId }) {
 
         {/* RIGHT: Catalog + Bookmarks */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <LiveCatalogEditor />
+          <LiveCatalogEditor dangerMode={dangerMode} dangerConfirm={dangerConfirm} />
+          <SystemConsole />
           <BookmarkManager />
         </div>
       </div>

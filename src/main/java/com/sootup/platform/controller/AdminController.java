@@ -23,7 +23,6 @@ import java.util.stream.Collectors;
  */
 @RestController
 @RequestMapping("/api/v1")
-@CrossOrigin(origins = "*")
 public class AdminController {
 
     @Autowired private JobStore jobStore;
@@ -145,7 +144,14 @@ public class AdminController {
     // GM-2: Live Sink Catalog — PUT /api/v1/admin/sink-catalog
     // ══════════════════════════════════════════════════════════════════════════
     @PutMapping("/admin/sink-catalog")
-    public ResponseEntity<?> updateSinkCatalog(@RequestBody Map<String, Object> body) {
+    public ResponseEntity<?> updateSinkCatalog(
+            @RequestHeader(value = "X-Danger-Mode", required = false) String dangerMode,
+            @RequestBody Map<String, Object> body) {
+        
+        if (!"confirmed".equals(dangerMode)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Danger Mode must be unlocked and confirmed."));
+        }
+
         @SuppressWarnings("unchecked")
         List<Map<String, String>> rules = (List<Map<String, String>>) body.getOrDefault("rules", List.of());
         // Hot-swap catalog in analysis service
@@ -213,20 +219,20 @@ public class AdminController {
     @GetMapping("/content/owasp-top10")
     public ResponseEntity<?> owaspTop10() {
         List<Map<String, Object>> top10 = List.of(
-            Map.of("rank",1,"id","A01:2025","name","Broken Access Control","description","Access control enforces policy such that users cannot act outside of their intended permissions. Failures lead to unauthorized access, data disclosure, modification, or destruction.","owaspUrl","https://owasp.org/Top10/A01_2021-Broken_Access_Control/","relatedSinkCategories",List.of("REFLECTION","FILE")),
-            Map.of("rank",2,"id","A02:2025","name","Cryptographic Failures","description","Failures related to cryptography often lead to sensitive data exposure. This includes use of weak algorithms, improper key management, or transmitting data in cleartext.","owaspUrl","https://owasp.org/Top10/A02_2021-Cryptographic_Failures/","relatedSinkCategories",List.of("NETWORK")),
-            Map.of("rank",3,"id","A03:2025","name","Injection","description","Injection flaws — SQL, NoSQL, OS, LDAP — occur when untrusted data is sent to an interpreter as part of a command or query. Attacker-supplied data can trick the interpreter into executing unintended commands.","owaspUrl","https://owasp.org/Top10/A03_2021-Injection/","relatedSinkCategories",List.of("SQL_INJECTION","COMMAND_INJECTION","LDAP_INJECTION","XPATH_INJECTION")),
-            Map.of("rank",4,"id","A04:2025","name","Insecure Design","description","Insecure design is a broad category representing different weaknesses, expressed as missing or ineffective control design. Missing threat modeling, insecure design patterns, and reference architectures.","owaspUrl","https://owasp.org/Top10/A04_2021-Insecure_Design/","relatedSinkCategories",List.of()),
-            Map.of("rank",5,"id","A05:2025","name","Security Misconfiguration","description","The application might be vulnerable if it is missing appropriate security hardening, or has insecure default values, incomplete or ad hoc configurations, or verbose error messages.","owaspUrl","https://owasp.org/Top10/A05_2021-Security_Misconfiguration/","relatedSinkCategories",List.of()),
-            Map.of("rank",6,"id","A06:2025","name","Vulnerable and Outdated Components","description","Components (libraries, frameworks) run with the same privileges as the application. If a vulnerable component is exploited, such an attack can facilitate serious data loss or server takeover.","owaspUrl","https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/","relatedSinkCategories",List.of()),
-            Map.of("rank",7,"id","A07:2025","name","Identification and Authentication Failures","description","Confirmation of the user's identity, authentication, and session management is critical to protect against authentication-related attacks.","owaspUrl","https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/","relatedSinkCategories",List.of()),
-            Map.of("rank",8,"id","A08:2025","name","Software and Data Integrity Failures","description","Software and data integrity failures relate to code and infrastructure that does not protect against integrity violations. Insecure deserialization is a common manifestation.","owaspUrl","https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/","relatedSinkCategories",List.of("INSECURE_DESERIALIZATION")),
-            Map.of("rank",9,"id","A09:2025","name","Security Logging and Monitoring Failures","description","Without logging and monitoring, breaches cannot be detected. Insufficient logging, detection, monitoring, and active response occurs at every stage of an operation.","owaspUrl","https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/","relatedSinkCategories",List.of()),
-            Map.of("rank",10,"id","A10:2025","name","Server-Side Request Forgery (SSRF)","description","SSRF flaws occur whenever a web application fetches a remote resource without validating the user-supplied URL. It allows an attacker to coerce the application to send a crafted request to an unexpected destination.","owaspUrl","https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/","relatedSinkCategories",List.of("NETWORK","SSRF"))
+            Map.of("rank",1,"id","A01:2025","name","Broken Access Control","description","Access control enforces policy such that users cannot act outside of their intended permissions. SSRF has now been folded into this category.","owaspUrl","https://owasp.org/Top10/A01_2025-Broken_Access_Control/","relatedSinkCategories",List.of("REFLECTION","FILE","NETWORK","SSRF")),
+            Map.of("rank",2,"id","A02:2025","name","Security Misconfiguration","description","The application might be vulnerable if it is missing appropriate security hardening, has insecure default values, or open cloud storage.","owaspUrl","https://owasp.org/Top10/A02_2025-Security_Misconfiguration/","relatedSinkCategories",List.of()),
+            Map.of("rank",3,"id","A03:2025","name","Software Supply Chain Failures","description","Components run with the same privileges as the application. Using components with known CVEs or compromised CI/CD amplifies blast radius.","owaspUrl","https://owasp.org/Top10/A03_2025-Software_Supply_Chain_Failures/","relatedSinkCategories",List.of()),
+            Map.of("rank",4,"id","A04:2025","name","Cryptographic Failures","description","Failures related to cryptography often lead to sensitive data exposure. This includes use of weak algorithms or transmitting data in cleartext.","owaspUrl","https://owasp.org/Top10/A04_2025-Cryptographic_Failures/","relatedSinkCategories",List.of("NETWORK")),
+            Map.of("rank",5,"id","A05:2025","name","Injection","description","Injection flaws occur when untrusted data is sent to an interpreter as part of a command or query.","owaspUrl","https://owasp.org/Top10/A05_2025-Injection/","relatedSinkCategories",List.of("SQL_INJECTION","COMMAND_INJECTION","LDAP_INJECTION","XPATH_INJECTION")),
+            Map.of("rank",6,"id","A06:2025","name","Insecure Design","description","Insecure design represents missing or ineffective control design, missing threat modeling, and insecure reference architectures.","owaspUrl","https://owasp.org/Top10/A06_2025-Insecure_Design/","relatedSinkCategories",List.of()),
+            Map.of("rank",7,"id","A07:2025","name","Authentication Failures","description","Confirmation of the user's identity, authentication, and session management is critical to protect against authentication-related attacks.","owaspUrl","https://owasp.org/Top10/A07_2025-Authentication_Failures/","relatedSinkCategories",List.of()),
+            Map.of("rank",8,"id","A08:2025","name","Software or Data Integrity Failures","description","Software and data integrity failures relate to code that does not protect against integrity violations. Insecure deserialization is a common manifestation.","owaspUrl","https://owasp.org/Top10/A08_2025-Software_or_Data_Integrity_Failures/","relatedSinkCategories",List.of("INSECURE_DESERIALIZATION")),
+            Map.of("rank",9,"id","A09:2025","name","Logging & Alerting Failures","description","Without logging and monitoring, breaches cannot be detected. Insufficient logging occurs at every stage of an operation.","owaspUrl","https://owasp.org/Top10/A09_2025-Logging_and_Alerting_Failures/","relatedSinkCategories",List.of()),
+            Map.of("rank",10,"id","A10:2025","name","Mishandling of Exceptional Conditions","description","Improper exception handling can leak sensitive internal state, cause denial of service, or lead to inconsistent application behavior.","owaspUrl","https://owasp.org/Top10/A10_2025-Mishandling_of_Exceptional_Conditions/","relatedSinkCategories",List.of())
         );
         return ResponseEntity.ok(Map.of(
             "edition", "OWASP Top 10 — 2025",
-            "lastUpdated", "2025-01-01",
+            "lastUpdated", java.time.LocalDate.now().toString(),
             "source", "https://owasp.org/www-project-top-ten/",
             "items", top10
         ));
@@ -299,12 +305,15 @@ public class AdminController {
     public ResponseEntity<?> setTaintRules(@PathVariable String jobId, @RequestBody Map<String, Object> body) {
         Optional<AnalysisJob> opt = jobStore.get(jobId);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
-        // Store in job metadata (simplified — stored as external vulnerabilities for display)
+        // Store in job metadata
         Map<String, Object> ruleEntry = new LinkedHashMap<>();
         ruleEntry.put("type", "custom-taint-rule");
         ruleEntry.put("data", body);
         opt.get().getExternalVulnerabilities().add(ruleEntry);
+        opt.get().getCustomTaintRules().add(ruleEntry);
+        // Clear cached chains to force re-run on next /taint request
+        opt.get().setTaintChains(null);
         jobStore.save(opt.get());
-        return ResponseEntity.ok(Map.of("status", "saved", "jobId", jobId));
+        return ResponseEntity.ok(Map.of("status", "saved", "jobId", jobId, "requiresReRun", true));
     }
 }

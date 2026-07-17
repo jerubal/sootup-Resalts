@@ -24,6 +24,32 @@ public class TaintPropagationEngine {
     private static final Logger log = LoggerFactory.getLogger(TaintPropagationEngine.class);
 
     public List<TaintChain> analyzeTaintFlows(AnalysisJob job, JavaView view, List<String> loadedClasses, Map<String, String> sourceCatalog, Map<String, String> sinkCatalog) {
+        // Merge custom job rules
+        Map<String, String> activeSources = new HashMap<>(sourceCatalog != null ? sourceCatalog : Collections.emptyMap());
+        Map<String, String> activeSinks = new HashMap<>(sinkCatalog != null ? sinkCatalog : Collections.emptyMap());
+        
+        if (job.getCustomTaintRules() != null) {
+            for (Map<String, Object> ruleWrapper : job.getCustomTaintRules()) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> ruleData = (Map<String, Object>) ruleWrapper.get("data");
+                if (ruleData != null) {
+                    String pattern = String.valueOf(ruleData.get("pattern"));
+                    String type = String.valueOf(ruleData.get("type"));
+                    String category = String.valueOf(ruleData.get("category"));
+                    if (category == null || "null".equals(category)) {
+                        category = String.valueOf(ruleData.get("riskCategory")); // fallback
+                    }
+                    if (pattern != null && !"null".equals(pattern)) {
+                        if ("source".equalsIgnoreCase(type)) {
+                            activeSources.put(pattern, category != null && !"null".equals(category) ? category : "CUSTOM_SOURCE");
+                        } else if ("sink".equalsIgnoreCase(type)) {
+                            activeSinks.put(pattern, category != null && !"null".equals(category) ? category : "CUSTOM_SINK");
+                        }
+                    }
+                }
+            }
+        }
+
         List<TaintChain> findings = new ArrayList<>();
         log.info("Starting CFG-based variable tracking taint propagation for job {}", job.getJobId());
 
@@ -32,7 +58,7 @@ public class TaintPropagationEngine {
                 for (SootMethod method : sootClass.getMethods()) {
                     if (method.getBody() == null) continue;
 
-                    findings.addAll(analyzeMethod(method, sourceCatalog, sinkCatalog));
+                    findings.addAll(analyzeMethod(method, activeSources, activeSinks));
                 }
             });
         }

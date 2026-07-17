@@ -32,6 +32,7 @@ public class AnalysisJob {
     private List<TaintChain> taintChains = null;
     private List<String> policyViolations = new ArrayList<>();
     private List<Map<String, Object>> externalVulnerabilities = new ArrayList<>();
+    private List<Map<String, Object>> customTaintRules = new ArrayList<>();
 
     public AnalysisJob(String jobId, AnalysisRequest request) {
         this.jobId = jobId;
@@ -149,5 +150,13 @@ public class AnalysisJob {
 
     public void setExternalVulnerabilities(List<Map<String, Object>> externalVulnerabilities) {
         this.externalVulnerabilities = externalVulnerabilities;
+    }
+
+    public List<Map<String, Object>> getCustomTaintRules() {
+        return customTaintRules;
+    }
+
+    public void setCustomTaintRules(List<Map<String, Object>> customTaintRules) {
+        this.customTaintRules = customTaintRules;
     }
 }

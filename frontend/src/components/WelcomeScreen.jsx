@@ -2,32 +2,51 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FlaskConical, Shield, Target, BookOpen, AlertTriangle, ChevronDown, ChevronRight, ArrowRight, ExternalLink } from 'lucide-react';
 
-const OWASP_LOCAL = [
-  { rank: 1, id: 'A01:2025', name: 'Broken Access Control', description: 'Access control failures let users act outside their intended permissions — unauthorized data access, modification, or destruction.', url: 'https://owasp.org/Top10/A01_2021-Broken_Access_Control/', icon: '🔓' },
-  { rank: 2, id: 'A02:2025', name: 'Cryptographic Failures', description: 'Weak or absent cryptography leads to sensitive data exposure — cleartext transmission, weak algorithms, poor key management.', url: 'https://owasp.org/Top10/A02_2021-Cryptographic_Failures/', icon: '🔐' },
-  { rank: 3, id: 'A03:2025', name: 'Injection', description: 'SQL, OS, LDAP injection: untrusted data sent to an interpreter tricks it into executing unintended commands.', url: 'https://owasp.org/Top10/A03_2021-Injection/', icon: '💉' },
-  { rank: 4, id: 'A04:2025', name: 'Insecure Design', description: 'Missing threat modeling and insecure design patterns that can\'t be fixed by perfect implementation alone.', url: 'https://owasp.org/Top10/A04_2021-Insecure_Design/', icon: '📐' },
-  { rank: 5, id: 'A05:2025', name: 'Security Misconfiguration', description: 'Insecure defaults, incomplete configurations, verbose errors, open cloud storage — the most common finding in audits.', url: 'https://owasp.org/Top10/A05_2021-Security_Misconfiguration/', icon: '⚙️' },
-  { rank: 6, id: 'A06:2025', name: 'Vulnerable & Outdated Components', description: 'Using components with known CVEs at the same privilege level as the application amplifies blast radius.', url: 'https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/', icon: '📦' },
-  { rank: 7, id: 'A07:2025', name: 'Auth & Session Failures', description: 'Broken auth, weak session tokens, credential stuffing, and missing MFA let attackers assume other users\' identities.', url: 'https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/', icon: '🪪' },
-  { rank: 8, id: 'A08:2025', name: 'Software & Data Integrity Failures', description: 'Code and infrastructure without integrity checks — insecure deserialization, unsigned updates, CI/CD pipeline attacks.', url: 'https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/', icon: '🧩' },
-  { rank: 9, id: 'A09:2025', name: 'Security Logging & Monitoring Failures', description: 'Without logging and monitoring, breaches cannot be detected, contained, or attributed.', url: 'https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/', icon: '📋' },
-  { rank: 10, id: 'A10:2025', name: 'Server-Side Request Forgery', description: 'SSRF lets an attacker coerce the server into fetching arbitrary internal or external URLs via untrusted input.', url: 'https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/', icon: '🌐' },
-];
-
 function OWASPPanel() {
   const [expanded, setExpanded] = useState(null);
+  const [owaspData, setOwaspData] = useState({ items: [], lastUpdated: '', edition: '' });
+  const [loading, setLoading] = useState(true);
+
+  React.useEffect(() => {
+    const API_HOST = import.meta.env.VITE_API_URL || '';
+    fetch(`${API_HOST}/api/v1/content/owasp-top10`)
+      .then(r => r.json())
+      .then(data => {
+        setOwaspData(data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading OWASP Top 10 data...</div>;
+  }
+
+  // Icons mapping
+  const getIcon = (id) => {
+    if (id.includes('A01')) return '🔓';
+    if (id.includes('A02')) return '⚙️';
+    if (id.includes('A03')) return '📦';
+    if (id.includes('A04')) return '🔐';
+    if (id.includes('A05')) return '💉';
+    if (id.includes('A06')) return '📐';
+    if (id.includes('A07')) return '🪪';
+    if (id.includes('A08')) return '🧩';
+    if (id.includes('A09')) return '📋';
+    if (id.includes('A10')) return '🌐';
+    return '🛡️';
+  };
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>OWASP Top 10 — 2025 Edition</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{owaspData.edition || 'OWASP Top 10'}</span>
         <a href="https://owasp.org/www-project-top-ten/" target="_blank" rel="noreferrer"
           style={{ fontSize: 10, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
           <ExternalLink size={10} /> owasp.org
         </a>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {OWASP_LOCAL.map(item => (
+        {owaspData.items && owaspData.items.map(item => (
           <div key={item.rank}
             style={{ background: 'var(--bg-elevated)', border: '1px solid var(--bg-border)', borderRadius: 8, overflow: 'hidden' }}>
             <button
@@ -37,7 +56,7 @@ function OWASPPanel() {
                 display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
                 color: 'var(--text-primary)', textAlign: 'left'
               }}>
-              <span style={{ fontSize: 15 }}>{item.icon}</span>
+              <span style={{ fontSize: 15 }}>{getIcon(item.id)}</span>
               <span style={{ fontSize: 10, color: 'var(--accent)', fontFamily: 'JetBrains Mono', fontWeight: 600, minWidth: 62 }}>{item.id}</span>
               <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{item.name}</span>
               {expanded === item.rank ? <ChevronDown size={13} color="var(--text-muted)" /> : <ChevronRight size={13} color="var(--text-muted)" />}
@@ -45,7 +64,7 @@ function OWASPPanel() {
             {expanded === item.rank && (
               <div style={{ padding: '0 12px 12px 48px', borderTop: '1px solid var(--bg-border)' }}>
                 <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '8px 0 8px' }}>{item.description}</p>
-                <a href={item.url} target="_blank" rel="noreferrer"
+                <a href={item.owaspUrl} target="_blank" rel="noreferrer"
                   style={{ fontSize: 11, color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
                   Full details on owasp.org <ExternalLink size={10} />
                 </a>
@@ -55,7 +74,7 @@ function OWASPPanel() {
         ))}
       </div>
       <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 12, textAlign: 'right' }}>
-        Last updated: 2025-01-01 · Sourced from OWASP Project
+        Last updated: {owaspData.lastUpdated || 'Unknown'} · Sourced from OWASP Project
       </p>
     </div>
   );
