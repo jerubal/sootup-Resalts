@@ -235,10 +235,13 @@ export function TaintViewer({ jobId, onSelectPath }) {
 
             {/* Action button */}
             {onSelectPath && (
-              <div style={{ marginTop: 24 }}>
-                <Btn onClick={() => onSelectPath(chains[selectedChain])}>
-                  <Activity size={13} /> View Taint Path in Graph Viewer
+              <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Btn onClick={() => onSelectPath(chains[selectedChain])} style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444' }}>
+                  <Play size={13} /> ▶ Play Attack Path in Graph Viewer
                 </Btn>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
+                  Switches to Call Graph tab and animates the taint chain hop-by-hop
+                </div>
               </div>
             )}
           </div>

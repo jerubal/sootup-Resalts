@@ -30,6 +30,7 @@ export function JobDetail() {
   const [loadingResult, setLoadingResult] = useState(false);
   const [tab, setTab] = useState('callgraph');
   const [cfgMethod, setCfgMethod] = useState(null);
+  const [playbackChain, setPlaybackChain] = useState(null);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -168,7 +169,7 @@ export function JobDetail() {
             <Tabs tabs={tabs} active={tab} onChange={setTab} />
           </div>
           <div style={{ minHeight: 480 }}>
-            {tab === 'callgraph' && <CallGraphViewer jobId={jobId} />}
+            {tab === 'callgraph' && <CallGraphViewer jobId={jobId} playbackChain={playbackChain} />}
             {tab === 'cfg' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16 }}>
                 <input
@@ -190,9 +191,8 @@ export function JobDetail() {
               <TaintViewer
                 jobId={jobId}
                 onSelectPath={(chain) => {
+                  setPlaybackChain(chain);
                   setTab('callgraph');
-                  // We can trigger pathfinding by changing route/parameters or setting local state if wanted, 
-                  // but switching tabs gives them the option to explore manually.
                 }}
               />
             )}

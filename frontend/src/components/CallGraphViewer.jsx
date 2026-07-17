@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import cytoscape from 'cytoscape';
 import { api } from '../api';
 import { EmptyState, Skeleton, Btn, Card } from './ui';
-import { Network, Search, ZoomIn, ZoomOut, Maximize2, GitMerge, AlertOctagon, Loader, Focus, LayoutGrid, X } from 'lucide-react';
+import { Network, Search, ZoomIn, ZoomOut, Maximize2, GitMerge, AlertOctagon, Loader, Focus, LayoutGrid, X, Play, Pause, SkipForward, SkipBack, RotateCcw } from 'lucide-react';
 
 /* ── UI-5 Package Treemap ─────────────────────────────────────────── */
 function PackageTreemap({ nodes }) {
@@ -79,9 +79,10 @@ const RISK_COLORS = {
   CODE_INJECTION:          '#ef4444',
 };
 
-export function CallGraphViewer({ jobId }) {
+export function CallGraphViewer({ jobId, playbackChain }) {
   const cyRef = useRef(null);
   const cyInstance = useRef(null);
+  const markerNodeId = useRef('__taint_marker__');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -99,6 +100,11 @@ export function CallGraphViewer({ jobId }) {
   const [focusMode, setFocusMode] = useState(false);     // F key
   const [viewMode, setViewMode] = useState('graph');       // 'graph' | 'treemap'
 
+  // FR-K: Animated taint-path playback state
+  const [attackPlayState, setAttackPlayState] = useState('stopped'); // 'stopped' | 'playing' | 'paused'
+  const [attackHopIndex, setAttackHopIndex] = useState(0);
+  const attackTimerRef = useRef(null);
+
   // F-key: toggle Focus Mode
   useEffect(() => {
     const handler = (e) => {
@@ -111,6 +117,93 @@ export function CallGraphViewer({ jobId }) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  // FR-K: When a new playbackChain arrives, reset playback state
+  useEffect(() => {
+    if (playbackChain) {
+      setAttackPlayState('stopped');
+      setAttackHopIndex(0);
+      clearInterval(attackTimerRef.current);
+
+      // Highlight all nodes in the chain and dim everything else
+      if (cyInstance.current && playbackChain.path?.length) {
+        cyInstance.current.elements().style('opacity', 0.1);
+        playbackChain.path.forEach((nodeId, i) => {
+          const node = cyInstance.current.getElementById(nodeId);
+          if (node.length) {
+            node.style('opacity', 1).style('border-color', i === 0 ? '#34d399' : i === playbackChain.path.length - 1 ? '#ef4444' : '#00ff66').style('border-width', 3);
+          }
+          if (i < playbackChain.path.length - 1) {
+            const nextId = playbackChain.path[i + 1];
+            const edge = cyInstance.current.edges(`[source="${nodeId}"][target="${nextId}"]`);
+            if (edge.length) edge.style('opacity', 0.6).style('line-color', '#00ff66').style('target-arrow-color', '#00ff66').style('width', 2);
+          }
+        });
+        // Fit camera to the taint path
+        const pathNodes = cyInstance.current.elements().filter(el => playbackChain.path.includes(el.data('id')));
+        if (pathNodes.length) cyInstance.current.animate({ fit: { eles: pathNodes, padding: 60 }, duration: 600, easing: 'ease-in-out-cubic' });
+      }
+    } else {
+      // Chain cleared — restore normal display
+      if (cyInstance.current) {
+        cyInstance.current.elements().style('opacity', 1);
+        cyInstance.current.nodes().forEach(n => {
+          n.style('border-color', n.data('isSink') ? (RISK_COLORS[n.data('riskCategory')] || '#ef4444') : n.data('color'));
+          n.style('border-width', n.data('isSink') ? 2.5 : 1.5);
+        });
+        cyInstance.current.edges().style('line-color', '#3a3a4a').style('target-arrow-color', '#3a3a4a').style('width', 1);
+      }
+    }
+    return () => clearInterval(attackTimerRef.current);
+  }, [playbackChain]);
+
+  // FR-K: Per-hop animation driver
+  useEffect(() => {
+    if (!playbackChain || !cyInstance.current) return;
+    const path = playbackChain.path || [];
+    if (!path.length) return;
+
+    // Highlight current hop node with glowing marker
+    path.forEach((nodeId, i) => {
+      const node = cyInstance.current.getElementById(nodeId);
+      if (!node.length) return;
+      if (i === attackHopIndex) {
+        node.style('border-color', '#ffffff').style('border-width', 4).style('background-opacity', 0.6).style('opacity', 1);
+        cyInstance.current.animate({ pan: cyInstance.current.pan(), zoom: cyInstance.current.zoom() }, { duration: 100 }); // noop to allow DOM reflow
+        cyInstance.current.animate({ center: { eles: node }, duration: 500, easing: 'ease-in-out-cubic' });
+      } else if (i < attackHopIndex) {
+        node.style('border-color', '#34d399').style('border-width', 2.5).style('background-opacity', 0.4).style('opacity', 1);
+      } else {
+        node.style('opacity', 0.15);
+      }
+    });
+
+    // Highlight traversed edges up to current hop
+    path.forEach((nodeId, i) => {
+      if (i >= attackHopIndex) return;
+      const nextId = path[i + 1];
+      if (!nextId) return;
+      const edge = cyInstance.current.edges(`[source="${nodeId}"][target="${nextId}"]`);
+      if (edge.length) edge.style('opacity', 1).style('line-color', '#00ff66').style('width', 3);
+    });
+  }, [attackHopIndex, playbackChain]);
+
+  // FR-K: Auto-advance timer
+  useEffect(() => {
+    clearInterval(attackTimerRef.current);
+    if (attackPlayState !== 'playing' || !playbackChain) return;
+    attackTimerRef.current = setInterval(() => {
+      setAttackHopIndex(prev => {
+        const max = (playbackChain.path?.length ?? 1) - 1;
+        if (prev >= max) {
+          setAttackPlayState('stopped');
+          return max;
+        }
+        return prev + 1;
+      });
+    }, 1800);
+    return () => clearInterval(attackTimerRef.current);
+  }, [attackPlayState, playbackChain]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -459,7 +552,85 @@ export function CallGraphViewer({ jobId }) {
         <div ref={cyRef} style={{ width: '100%', height: '100%', minHeight: 520, background: 'var(--bg-base)' }} />
       </div>
 
-      {/* Side detail panel */}
+        {/* FR-K: Attack Path Playback Overlay */}
+        {playbackChain && (
+          <div style={{
+            position: 'absolute', bottom: 60, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+          }}>
+            {/* Hop callout label */}
+            <div style={{
+              background: 'rgba(0,0,0,0.85)', border: '1px solid var(--accent)',
+              borderRadius: 8, padding: '8px 16px', fontSize: 12,
+              color: 'var(--text-primary)', fontFamily: 'JetBrains Mono, monospace',
+              textAlign: 'center', backdropFilter: 'blur(4px)', maxWidth: 420,
+            }}>
+              {attackPlayState === 'stopped' && attackHopIndex === 0 && (
+                <span style={{ color: 'var(--accent)', fontWeight: 600 }}>▶ Taint payload ready — press Play to animate the attack chain</span>
+              )}
+              {(attackPlayState !== 'stopped' || attackHopIndex > 0) && (() => {
+                const path = playbackChain.path || [];
+                const node = path[attackHopIndex] || '';
+                const label = node.split(':').pop()?.replace('>', '') || node;
+                const isLast = attackHopIndex === path.length - 1;
+                const isFirst = attackHopIndex === 0;
+                return (
+                  <span>
+                    <span style={{ color: isFirst ? '#34d399' : isLast ? '#ef4444' : 'var(--accent)', fontWeight: 700 }}>
+                      {isFirst ? '⬤ Source' : isLast ? '✕ Sink' : `Hop ${attackHopIndex + 1}`}
+                    </span>
+                    {' — '}
+                    <span style={{ color: 'var(--text-primary)' }}>{label}</span>
+                    {isLast && <span style={{ color: '#ef4444', marginLeft: 8 }}>({playbackChain.sinkRiskCategory})</span>}
+                  </span>
+                );
+              })()}
+            </div>
+            {/* Playback controls */}
+            <div style={{
+              display: 'flex', gap: 8, alignItems: 'center',
+              background: 'rgba(0,0,0,0.88)', border: '1px solid var(--bg-border)',
+              borderRadius: 10, padding: '8px 14px', backdropFilter: 'blur(6px)',
+            }}>
+              <span style={{ fontSize: 10, color: 'var(--status-red)', fontWeight: 700, textTransform: 'uppercase', marginRight: 4 }}>
+                ▶ Attack Path
+              </span>
+              <Btn variant="subtle" size="sm" onClick={() => { setAttackHopIndex(0); setAttackPlayState('stopped'); }}>
+                <RotateCcw size={13} />
+              </Btn>
+              <Btn variant="subtle" size="sm"
+                onClick={() => setAttackHopIndex(i => Math.max(0, i - 1))}
+                disabled={attackHopIndex === 0}>
+                <SkipBack size={13} />
+              </Btn>
+              <Btn
+                variant={attackPlayState === 'playing' ? 'primary' : 'subtle'}
+                size="sm"
+                onClick={() => {
+                  if (attackPlayState === 'playing') {
+                    setAttackPlayState('paused');
+                  } else {
+                    if (attackHopIndex >= (playbackChain.path?.length ?? 1) - 1) setAttackHopIndex(0);
+                    setAttackPlayState('playing');
+                  }
+                }}
+              >
+                {attackPlayState === 'playing' ? <Pause size={13} /> : <Play size={13} />}
+                {attackPlayState === 'playing' ? 'Pause' : 'Play'}
+              </Btn>
+              <Btn variant="subtle" size="sm"
+                onClick={() => setAttackHopIndex(i => Math.min((playbackChain.path?.length ?? 1) - 1, i + 1))}
+                disabled={attackHopIndex >= (playbackChain.path?.length ?? 1) - 1}>
+                <SkipForward size={13} />
+              </Btn>
+              <span style={{ fontSize: 11, fontFamily: 'JetBrains Mono', color: 'var(--accent)', marginLeft: 4 }}>
+                {attackHopIndex + 1} / {playbackChain.path?.length ?? '?'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Side detail panel */}
       {selected && (
         <div style={{
           width: 320, background: 'var(--bg-surface)', borderLeft: '1px solid var(--bg-border)',
