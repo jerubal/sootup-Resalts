@@ -1,4 +1,5 @@
-const BASE = '/api/v1/analyses';
+const API_HOST = import.meta.env.VITE_API_URL || '';
+const BASE = `${API_HOST}/api/v1/analyses`;
 
 /** Generic helper: wraps fetch + json parse + error throw */
 async function request(url, method = 'GET', body) {
@@ -34,11 +35,11 @@ export const api = {
   },
 
   /* ── GM-1: REPL Query Console ───────────────────────────────────── */
-  post: (path, body) => request(`/api/v1${path}`, 'POST', body),
+  post: (path, body) => request(`${API_HOST}/api/v1${path}`, 'POST', body),
 
   /* ── GM-2: Live catalog hot-swap ────────────────────────────────── */
-  put:  (path, body) => request(`/api/v1${path}`, 'PUT', body),
+  put:  (path, body) => request(`${API_HOST}/api/v1${path}`, 'PUT', body),
 
   /* ── GM-4/6/8: Admin GET endpoints ─────────────────────────────── */
-  get:  (path)       => request(`/api/v1${path}`, 'GET'),
+  get:  (path)       => request(`${API_HOST}/api/v1${path}`, 'GET'),
 };
