@@ -154,6 +154,28 @@ export function NewAnalysisForm() {
                 </button>
               ))}
             </div>
+
+            {/* QILIN — Advanced opt-in */}
+            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 6, background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  ⚠ Advanced — Pointer Analysis
+                </span>
+              </div>
+              <button type="button" onClick={() => setCgAlgorithm(cgAlgorithm === 'QILIN' ? 'CHA' : 'QILIN')}
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+                  border: `1px solid ${cgAlgorithm === 'QILIN' ? '#f59e0b' : 'var(--bg-border)'}`,
+                  background: cgAlgorithm === 'QILIN' ? 'rgba(245,158,11,0.1)' : 'var(--bg-elevated)',
+                  color: cgAlgorithm === 'QILIN' ? '#f59e0b' : 'var(--text-secondary)',
+                  transition: 'all 0.15s', textAlign: 'left',
+                }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>QILIN — Pointer Analysis (Opt-in)</div>
+                <div style={{ fontSize: 11, marginTop: 3, opacity: 0.85 }}>
+                  On-the-fly context-insensitive pointer analysis. Most precise call graph but significantly more expensive than CHA/RTA. Requires larger targets.
+                </div>
+              </button>
+            </div>
           </Card>
         )}
 

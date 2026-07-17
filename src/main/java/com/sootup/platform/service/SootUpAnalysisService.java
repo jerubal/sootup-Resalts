@@ -24,6 +24,9 @@ import sootup.callgraph.CallGraph;
 import sootup.callgraph.CallGraphAlgorithm;
 import sootup.callgraph.ClassHierarchyAnalysisAlgorithm;
 import sootup.callgraph.RapidTypeAnalysisAlgorithm;
+import sootup.qilin.pta.PTAPattern;
+import sootup.qilin.pta.PTAFactory;
+import sootup.qilin.pta.PTA;
 
 import jakarta.annotation.PostConstruct;
 import java.io.BufferedReader;
@@ -45,11 +48,13 @@ public class SootUpAnalysisService {
     // Taint catalogs
     private final Map<String, String> sinkCatalog = new LinkedHashMap<>();
     private final Map<String, String> sourceCatalog = new LinkedHashMap<>();
+    private final Map<String, String> sanitizerCatalog = new LinkedHashMap<>();
 
     @PostConstruct
     public void loadCatalogs() {
         loadSinkCatalog();
         loadSourceCatalog();
+        loadSanitizerCatalog();
     }
 
     public void loadSinkCatalog() {
@@ -98,6 +103,29 @@ public class SootUpAnalysisService {
         }
     }
 
+    public void loadSanitizerCatalog() {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream("sanitizers.yaml")) {
+            if (is == null) { log.warn("sanitizers.yaml not found on classpath — sanitizer detection disabled."); return; }
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
+                String line;
+                String currentPattern = null;
+                while ((line = br.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("- pattern:")) {
+                        currentPattern = line.substring("- pattern:".length()).trim().replaceAll("^\"|\"$", "");
+                    } else if (line.startsWith("sanitizerCategory:") && currentPattern != null) {
+                        String category = line.substring("sanitizerCategory:".length()).trim().replaceAll("^\"|\"$", "");
+                        sanitizerCatalog.put(currentPattern, category);
+                        currentPattern = null;
+                    }
+                }
+            }
+            log.info("Loaded {} sanitizer patterns from sanitizers.yaml", sanitizerCatalog.size());
+        } catch (Exception e) {
+            log.error("Failed to load sanitizers.yaml: {}", e.getMessage());
+        }
+    }
+
     /** Returns the riskCategory if the method signature matches a known sink, else null. */
     private String matchSink(String methodSig) {
         for (Map.Entry<String, String> entry : sinkCatalog.entrySet()) {
@@ -119,6 +147,9 @@ public class SootUpAnalysisService {
 
     /** Exposes the live source catalog. */
     public Map<String, String> getSourceCatalog() { return sourceCatalog; }
+
+    /** Exposes the live sanitizer catalog. */
+    public Map<String, String> getSanitizerCatalog() { return sanitizerCatalog; }
 
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -233,14 +264,20 @@ public class SootUpAnalysisService {
                             throw new IllegalArgumentException("No valid entry points could be resolved from: " + job.getRequest().getEntryPoints());
                         }
 
-                        CallGraphAlgorithm cgAlgorithm;
-                        if ("RTA".equalsIgnoreCase(job.getRequest().getCgAlgorithm())) {
-                            cgAlgorithm = new RapidTypeAnalysisAlgorithm(view);
+                        CallGraph cg;
+                        if ("QILIN".equalsIgnoreCase(job.getRequest().getCgAlgorithm())) {
+                            PTAPattern ptaPattern = new PTAPattern("insens");
+                            PTA pta = PTAFactory.createPTA(ptaPattern, view, resolvedEntries);
+                            pta.run();
+                            cg = pta.getCallGraph();
+                        } else if ("RTA".equalsIgnoreCase(job.getRequest().getCgAlgorithm())) {
+                            CallGraphAlgorithm cgAlgorithm = new RapidTypeAnalysisAlgorithm(view);
+                            cg = cgAlgorithm.initialize(resolvedEntries);
                         } else {
-                            cgAlgorithm = new ClassHierarchyAnalysisAlgorithm(view);
+                            CallGraphAlgorithm cgAlgorithm = new ClassHierarchyAnalysisAlgorithm(view);
+                            cg = cgAlgorithm.initialize(resolvedEntries);
                         }
 
-                        CallGraph cg = cgAlgorithm.initialize(resolvedEntries);
                         GraphResponse callGraphResponse = convertCallGraphToResponse(cg, resolvedEntries);
                         job.setCallGraph(callGraphResponse);
                         job.setEdgeCount(callGraphResponse.getEdges().size());
@@ -256,7 +293,7 @@ public class SootUpAnalysisService {
                 public void execute(AnalysisJob job, JavaView[] viewContainer) throws Exception {
                     JavaView view = viewContainer[0];
                     List<com.sootup.platform.dto.TaintChain> variableTaints = taintPropagationEngine.analyzeTaintFlows(
-                        job, view, job.getLoadedClasses(), sourceCatalog, sinkCatalog
+                        job, view, job.getLoadedClasses(), sourceCatalog, sinkCatalog, sanitizerCatalog
                     );
                     
                     // Fallback/combine with CG paths if empty
@@ -628,11 +665,13 @@ public class SootUpAnalysisService {
                     }
                     Collections.reverse(path);
                     
-                    chains.add(new com.sootup.platform.dto.TaintChain(
+                    com.sootup.platform.dto.TaintChain tc = new com.sootup.platform.dto.TaintChain(
                         startNode, srcCategory,
                         current, sinks.get(current),
                         path
-                    ));
+                    );
+                    tc.setConfidence("medium");
+                    chains.add(tc);
                 }
 
                 List<String> neighbors = adj.getOrDefault(current, Collections.emptyList());

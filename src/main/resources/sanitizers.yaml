@@ -1,0 +1,17 @@
+# Taint sanitizer catalog — configurable without code changes.
+# Sanitizers clean/neutralize tainted values. If a variable is passed
+# to a sanitizer, or assigned from a sanitizer's output, it is marked safe.
+
+sanitizers:
+  - pattern: "OWASP"
+    sanitizerCategory: "DEFAULT"
+  - pattern: "Encoder.encode"
+    sanitizerCategory: "DEFAULT"
+  - pattern: "Jsoup.clean"
+    sanitizerCategory: "DEFAULT"
+  - pattern: "PreparedStatement.setString"
+    sanitizerCategory: "DEFAULT"
+  - pattern: "HtmlUtils.htmlEscape"
+    sanitizerCategory: "DEFAULT"
+  - pattern: "StringEscapeUtils.escapeHtml"
+    sanitizerCategory: "DEFAULT"

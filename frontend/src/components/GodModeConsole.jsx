@@ -229,35 +229,61 @@ function QueryConsole({ jobId }) {
 
 /* ─── GM-2 Live Catalog Editor ──────────────────────────────────────── */
 function LiveCatalogEditor({ dangerMode, dangerConfirm }) {
-  const [sinks, setSinks] = useState([
-    { pattern: 'Runtime.exec(', riskCategory: 'COMMAND_INJECTION' },
-    { pattern: 'ProcessBuilder', riskCategory: 'COMMAND_INJECTION' },
-    { pattern: 'ObjectInputStream.readObject(', riskCategory: 'INSECURE_DESERIALIZATION' },
-    { pattern: 'Statement.execute', riskCategory: 'SQL_INJECTION' },
-    { pattern: 'prepareStatement', riskCategory: 'SQL_INJECTION' },
-  ]);
+  const [editorType, setEditorType] = useState('sinks'); // 'sinks' | 'sanitizers'
+  const [rules, setRules] = useState([]);
   const [newPattern, setNewPattern] = useState('');
   const [newCategory, setNewCategory] = useState('COMMAND_INJECTION');
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  useEffect(() => {
-    api.get('/admin/sink-catalog')
+  const fetchRules = (type) => {
+    const endpoint = type === 'sinks' ? '/admin/sink-catalog' : '/admin/sanitizer-catalog';
+    api.get(endpoint)
       .then(res => {
-        if (res && res.rules) setSinks(res.rules);
+        if (res && res.rules) {
+          setRules(res.rules.map(r => ({
+            pattern: r.pattern,
+            category: r.riskCategory || r.sanitizerCategory || 'DEFAULT'
+          })));
+          setSaved(true);
+        }
       })
-      .catch(() => { /* fallback to hardcoded initial state */ });
-  }, []);
+      .catch(() => {
+        // Fallback hardcoded defaults
+        if (type === 'sinks') {
+          setRules([
+            { pattern: 'Runtime.exec(', category: 'COMMAND_INJECTION' },
+            { pattern: 'ProcessBuilder', category: 'COMMAND_INJECTION' },
+            { pattern: 'ObjectInputStream.readObject(', category: 'INSECURE_DESERIALIZATION' },
+            { pattern: 'Statement.execute', category: 'SQL_INJECTION' },
+            { pattern: 'prepareStatement', category: 'SQL_INJECTION' },
+          ]);
+        } else {
+          setRules([
+            { pattern: 'Encoder.encode', category: 'DEFAULT' },
+            { pattern: 'Jsoup.clean', category: 'DEFAULT' },
+          ]);
+        }
+        setSaved(false);
+      });
+  };
 
-  const addSink = () => {
+  useEffect(() => {
+    fetchRules(editorType);
+  }, [editorType]);
+
+  const addRule = () => {
     if (!newPattern.trim()) return;
-    setSinks(prev => [...prev, { pattern: newPattern.trim(), riskCategory: newCategory }]);
+    setRules(prev => [...prev, { pattern: newPattern.trim(), category: newCategory }]);
     setNewPattern('');
     setSaved(false);
   };
 
-  const removeSink = (idx) => { setSinks(prev => prev.filter((_, i) => i !== idx)); setSaved(false); };
+  const removeRule = (idx) => {
+    setRules(prev => prev.filter((_, i) => i !== idx));
+    setSaved(false);
+  };
 
   const pushToServer = async () => {
     if (!dangerMode || dangerConfirm !== 'confirm') {
@@ -267,9 +293,21 @@ function LiveCatalogEditor({ dangerMode, dangerConfirm }) {
     setSaving(true);
     setErrorMsg('');
     try {
-      const opts = { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Danger-Mode': 'confirmed' }, body: JSON.stringify({ rules: sinks }) };
+      const endpoint = editorType === 'sinks' ? '/admin/sink-catalog' : '/admin/sanitizer-catalog';
+      const formattedRules = rules.map(r => {
+        if (editorType === 'sinks') {
+          return { pattern: r.pattern, riskCategory: r.category };
+        } else {
+          return { pattern: r.pattern, sanitizerCategory: r.category };
+        }
+      });
+      const opts = {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Danger-Mode': 'confirmed' },
+        body: JSON.stringify({ rules: formattedRules })
+      };
       const API_HOST = import.meta.env.VITE_API_URL || '';
-      const res = await fetch(`${API_HOST}/api/v1/admin/sink-catalog`, opts);
+      const res = await fetch(`${API_HOST}/api/v1${endpoint}`, opts);
       if (!res.ok) throw new Error('Failed to save');
       setSaved(true);
     } catch {
@@ -279,46 +317,74 @@ function LiveCatalogEditor({ dangerMode, dangerConfirm }) {
     }
   };
 
-  const CATEGORIES = ['COMMAND_INJECTION', 'SQL_INJECTION', 'INSECURE_DESERIALIZATION', 'REFLECTION', 'XSS', 'SSRF', 'FILE', 'NETWORK', 'LDAP_INJECTION'];
+  const CATEGORIES = editorType === 'sinks'
+    ? ['COMMAND_INJECTION', 'SQL_INJECTION', 'INSECURE_DESERIALIZATION', 'REFLECTION', 'XSS', 'SSRF', 'FILE', 'NETWORK', 'LDAP_INJECTION']
+    : ['DEFAULT', 'HTML_ESCAPE', 'SQL_SANITIZE', 'PATH_SANITIZE'];
 
   return (
     <Card style={{ padding: 16, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-primary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <ShieldAlert size={13} color="var(--status-amber)" /> Live Sink Catalog
-        <span style={{ marginLeft: 'auto', fontSize: 9, color: saved ? '#34d399' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-          {saved ? '✓ synced' : `${sinks.length} rules · unsaved`}
+      {/* Header and Sync Status */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+        <ShieldAlert size={13} color="var(--status-amber)" />
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-primary)' }}>
+          Live Catalog Rules
         </span>
+        <span style={{ marginLeft: 'auto', fontSize: 9, color: saved ? '#34d399' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          {saved ? '✓ synced' : `${rules.length} rules · unsaved`}
+        </span>
+      </div>
+
+      {/* Editor Selector Tabs */}
+      <div style={{ display: 'flex', background: 'var(--bg-elevated)', borderRadius: 5, padding: 2, marginBottom: 12, border: '1px solid var(--bg-border)' }}>
+        <button
+          onClick={() => { setEditorType('sinks'); setNewCategory('COMMAND_INJECTION'); }}
+          style={{
+            flex: 1, background: editorType === 'sinks' ? 'var(--bg-border)' : 'none',
+            border: 'none', borderRadius: 4, cursor: 'pointer', padding: '3px 8px', fontSize: 10,
+            color: editorType === 'sinks' ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: 600
+          }}>
+          Sinks
+        </button>
+        <button
+          onClick={() => { setEditorType('sanitizers'); setNewCategory('DEFAULT'); }}
+          style={{
+            flex: 1, background: editorType === 'sanitizers' ? 'var(--bg-border)' : 'none',
+            border: 'none', borderRadius: 4, cursor: 'pointer', padding: '3px 8px', fontSize: 10,
+            color: editorType === 'sanitizers' ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: 600
+          }}>
+          Sanitizers
+        </button>
       </div>
 
       {/* Add rule */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, padding: 10, background: 'var(--bg-elevated)', borderRadius: 7, border: '1px solid var(--bg-border)' }}>
-        <input placeholder="Method pattern (e.g. Runtime.exec)"
+        <input placeholder={editorType === 'sinks' ? 'Method pattern (e.g. Runtime.exec)' : 'Sanitizer pattern (e.g. Encoder.encode)'}
           value={newPattern} onChange={e => setNewPattern(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && addSink()}
+          onKeyDown={e => e.key === 'Enter' && addRule()}
           style={{ background: 'var(--bg-surface)', border: '1px solid var(--bg-border)', borderRadius: 5, padding: '6px 10px', color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'JetBrains Mono' }} />
         <div style={{ display: 'flex', gap: 6 }}>
           <select value={newCategory} onChange={e => setNewCategory(e.target.value)}
             style={{ flex: 1, background: 'var(--bg-surface)', border: '1px solid var(--bg-border)', borderRadius: 5, padding: '6px 8px', color: 'var(--text-primary)', fontSize: 11, outline: 'none' }}>
             {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <Btn variant="subtle" onClick={addSink}><Plus size={13} /></Btn>
+          <Btn variant="subtle" onClick={addRule}><Plus size={13} /></Btn>
         </div>
       </div>
 
       {/* Rules list */}
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 180 }}>
-        {sinks.map((s, idx) => (
+        {rules.map((s, idx) => (
           <div key={idx} style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             background: 'var(--bg-surface)', border: '1px solid var(--bg-border)',
             padding: '5px 10px', borderRadius: 5,
-            borderLeft: '2px solid var(--status-amber)',
+            borderLeft: `2px solid ${editorType === 'sinks' ? 'var(--status-amber)' : '#34d399'}`,
           }}>
             <div style={{ overflow: 'hidden', minWidth: 0 }}>
               <div style={{ fontSize: 11, fontFamily: 'JetBrains Mono', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.pattern}</div>
-              <div style={{ fontSize: 9, color: 'var(--status-amber)', marginTop: 1 }}>{s.riskCategory}</div>
+              <div style={{ fontSize: 9, color: editorType === 'sinks' ? 'var(--status-amber)' : '#34d399', marginTop: 1 }}>{s.category}</div>
             </div>
-            <button onClick={() => removeSink(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--status-red)', flexShrink: 0 }}>
+            <button onClick={() => removeRule(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--status-red)', flexShrink: 0 }}>
               <Trash size={11} />
             </button>
           </div>

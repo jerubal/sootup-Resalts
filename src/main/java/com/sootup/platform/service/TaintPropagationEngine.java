@@ -7,26 +7,35 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import sootup.core.graph.StmtGraph;
 import sootup.core.jimple.common.expr.AbstractInvokeExpr;
-import sootup.core.jimple.common.ref.JInstanceFieldRef;
 import sootup.core.jimple.common.stmt.JAssignStmt;
 import sootup.core.jimple.common.stmt.JInvokeStmt;
 import sootup.core.jimple.common.stmt.Stmt;
 import sootup.core.model.SootMethod;
 import sootup.core.signatures.MethodSignature;
-import sootup.java.core.JavaSootClass;
 import sootup.java.core.views.JavaView;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class TaintPropagationEngine {
 
     private static final Logger log = LoggerFactory.getLogger(TaintPropagationEngine.class);
+    private static final int MAX_CALL_DEPTH = 6;
 
-    public List<TaintChain> analyzeTaintFlows(AnalysisJob job, JavaView view, List<String> loadedClasses, Map<String, String> sourceCatalog, Map<String, String> sinkCatalog) {
-        // Merge custom job rules
+    public List<TaintChain> analyzeTaintFlows(
+            AnalysisJob job, 
+            JavaView view, 
+            List<String> loadedClasses, 
+            Map<String, String> sourceCatalog, 
+            Map<String, String> sinkCatalog,
+            Map<String, String> sanitizerCatalog) {
+        
+        // Merge custom rules into catalogs
         Map<String, String> activeSources = new HashMap<>(sourceCatalog != null ? sourceCatalog : Collections.emptyMap());
         Map<String, String> activeSinks = new HashMap<>(sinkCatalog != null ? sinkCatalog : Collections.emptyMap());
+        Map<String, String> activeSanitizers = new HashMap<>(sanitizerCatalog != null ? sanitizerCatalog : Collections.emptyMap());
         
         if (job.getCustomTaintRules() != null) {
             for (Map<String, Object> ruleWrapper : job.getCustomTaintRules()) {
@@ -44,6 +53,8 @@ public class TaintPropagationEngine {
                             activeSources.put(pattern, category != null && !"null".equals(category) ? category : "CUSTOM_SOURCE");
                         } else if ("sink".equalsIgnoreCase(type)) {
                             activeSinks.put(pattern, category != null && !"null".equals(category) ? category : "CUSTOM_SINK");
+                        } else if ("sanitizer".equalsIgnoreCase(type)) {
+                            activeSanitizers.put(pattern, "DEFAULT");
                         }
                     }
                 }
@@ -51,16 +62,71 @@ public class TaintPropagationEngine {
         }
 
         List<TaintChain> findings = new ArrayList<>();
-        log.info("Starting CFG-based variable tracking taint propagation for job {}", job.getJobId());
+        log.info("Starting interprocedural variable-tracking taint propagation for job {}", job.getJobId());
 
+        // Locate all methods and cache them
+        Map<String, SootMethod> allMethods = new HashMap<>();
         for (String className : loadedClasses) {
             view.getClass(view.getIdentifierFactory().getClassType(className)).ifPresent(sootClass -> {
                 for (SootMethod method : sootClass.getMethods()) {
-                    if (method.getBody() == null) continue;
-
-                    findings.addAll(analyzeMethod(method, activeSources, activeSinks));
+                    allMethods.put(method.getSignature().toString(), method);
                 }
             });
+        }
+
+        // Run interprocedural analysis starting from source call sites
+        for (SootMethod method : allMethods.values()) {
+            if (method.getBody() == null) continue;
+
+            StmtGraph<?> stmtGraph = method.getBody().getStmtGraph();
+            List<? extends Stmt> stmts = stmtGraph.getStmts();
+
+            for (Stmt stmt : stmts) {
+                // Check if statement contains a source call
+                AbstractInvokeExpr invokeExpr = null;
+                if (stmt instanceof JAssignStmt && ((JAssignStmt) stmt).getRightOp() instanceof AbstractInvokeExpr) {
+                    invokeExpr = (AbstractInvokeExpr) ((JAssignStmt) stmt).getRightOp();
+                } else if (stmt instanceof JInvokeStmt) {
+                    invokeExpr = (AbstractInvokeExpr) ((JInvokeStmt) stmt).getInvokeExpr();
+                }
+
+                if (invokeExpr != null) {
+                    MethodSignature calleeSig = invokeExpr.getMethodSignature();
+                    String srcCat = matchCatalog(calleeSig, activeSources);
+                    if (srcCat != null) {
+                        // Taint source triggered!
+                        String taintedLocal = null;
+                        if (stmt instanceof JAssignStmt) {
+                            taintedLocal = ((JAssignStmt) stmt).getLeftOp().toString();
+                        }
+                        
+                        Set<String> taintedLocals = new HashSet<>();
+                        if (taintedLocal != null) {
+                            taintedLocals.add(taintedLocal);
+                        }
+
+                        List<String> path = new ArrayList<>();
+                        path.add(calleeSig.toString());
+                        path.add(method.getSignature().toString());
+
+                        Set<String> visited = new HashSet<>();
+                        visited.add(method.getSignature().toString());
+
+                        propagateTaintRecursive(
+                            method, 
+                            taintedLocals, 
+                            path, 
+                            1, 
+                            allMethods, 
+                            activeSources, 
+                            activeSinks, 
+                            activeSanitizers, 
+                            findings, 
+                            visited
+                        );
+                    }
+                }
+            }
         }
 
         // FR-M: Apply business-context risk multipliers
@@ -77,125 +143,211 @@ public class TaintPropagationEngine {
                         String tagLabel   = String.valueOf(tagData.getOrDefault("label", "business-critical"));
                         chain.setBusinessTag(tagLabel);
                         chain.setBusinessMultiplier(multiplier);
-                        break; // first matching tag wins
+                        break; 
                     }
                 }
             }
-            // Re-sort: business-tagged chains to the top
-            findings.sort((a, b) -> {
-                double ma = a.getBusinessMultiplier();
-                double mb = b.getBusinessMultiplier();
-                return Double.compare(mb, ma);
-            });
+            findings.sort((a, b) -> Double.compare(b.getBusinessMultiplier(), a.getBusinessMultiplier()));
         }
 
         return findings;
     }
 
-    private List<TaintChain> analyzeMethod(SootMethod method, Map<String, String> sourceCatalog, Map<String, String> sinkCatalog) {
-        List<TaintChain> methodFindings = new ArrayList<>();
-        String methodSig = method.getSignature().toString();
+    private boolean propagateTaintRecursive(
+            SootMethod method,
+            Set<String> taintedLocals,
+            List<String> currentPath,
+            int depth,
+            Map<String, SootMethod> allMethods,
+            Map<String, String> sources,
+            Map<String, String> sinks,
+            Map<String, String> sanitizers,
+            List<TaintChain> findings,
+            Set<String> visited) {
+
+        if (depth > MAX_CALL_DEPTH || method.getBody() == null) {
+            return false;
+        }
 
         StmtGraph<?> stmtGraph = method.getBody().getStmtGraph();
         List<? extends Stmt> stmts = stmtGraph.getStmts();
-
-        // Map to keep track of tainted variables/locals
-        Set<String> taintedLocals = new HashSet<>();
-        
-        // Track the statement path where a local became tainted
-        Map<String, List<String>> taintPaths = new HashMap<>();
+        boolean returnsTaintedLocal = false;
 
         for (Stmt stmt : stmts) {
+            // Extract call site if any
+            AbstractInvokeExpr invokeExpr = null;
+            if (stmt instanceof JAssignStmt && ((JAssignStmt) stmt).getRightOp() instanceof AbstractInvokeExpr) {
+                invokeExpr = (AbstractInvokeExpr) ((JAssignStmt) stmt).getRightOp();
+            } else if (stmt instanceof JInvokeStmt) {
+                invokeExpr = (AbstractInvokeExpr) ((JInvokeStmt) stmt).getInvokeExpr();
+            }
 
-            // Case 1: Assignment Stmt
+            // Case 1: Sanitizer call check
+            if (invokeExpr != null) {
+                String sanitizerCat = matchCatalog(invokeExpr.getMethodSignature(), sanitizers);
+                if (sanitizerCat != null) {
+                    if (stmt instanceof JAssignStmt) {
+                        String leftOp = ((JAssignStmt) stmt).getLeftOp().toString();
+                        taintedLocals.remove(leftOp);
+                    }
+                    for (Object arg : invokeExpr.getArgs()) {
+                        taintedLocals.remove(arg.toString());
+                    }
+                    continue; 
+                }
+            }
+
+            // Case 2: Assignment Stmt
             if (stmt instanceof JAssignStmt) {
-                @SuppressWarnings("unchecked")
                 JAssignStmt assign = (JAssignStmt) stmt;
                 String leftOp = assign.getLeftOp().toString();
                 String rightOp = assign.getRightOp().toString();
 
                 boolean rhsTainted = false;
-                String detectedSource = null;
-                String detectedSourceCat = null;
-
-                // Check if right-hand side invokes a Source
-                if (assign.getRightOp() instanceof AbstractInvokeExpr) {
-                    AbstractInvokeExpr invoke = (AbstractInvokeExpr) assign.getRightOp();
-                    String calleeSig = invoke.getMethodSignature().toString();
-                    String srcCat = matchCatalog(calleeSig, sourceCatalog);
-                    if (srcCat != null) {
-                        rhsTainted = true;
-                        detectedSource = calleeSig;
-                        detectedSourceCat = srcCat;
-                    }
-                }
-
-                // Check if right-hand side uses an already tainted local variable
                 for (String tainted : taintedLocals) {
-                    if (rightOp.contains(tainted)) {
+                    if (Pattern.compile("\\b" + Pattern.quote(tainted) + "\\b").matcher(rightOp).find()) {
                         rhsTainted = true;
-                        if (detectedSource == null) {
-                            // Inherit source details
-                            List<String> parentPath = taintPaths.get(tainted);
-                            if (parentPath != null && !parentPath.isEmpty()) {
-                                detectedSource = parentPath.get(0);
-                            }
-                        }
                         break;
                     }
                 }
 
                 if (rhsTainted) {
                     taintedLocals.add(leftOp);
-                    List<String> path = new ArrayList<>();
-                    path.add(detectedSource != null ? detectedSource : rightOp);
-                    path.add(methodSig);
-                    taintPaths.put(leftOp, path);
                 }
             }
-            // Case 2: Checking Sinks (could be JInvokeStmt or JAssignStmt containing InvokeExpr)
-            AbstractInvokeExpr invokeExpr = null;
-            if (stmt instanceof JInvokeStmt) {
-                invokeExpr = (AbstractInvokeExpr) ((JInvokeStmt) stmt).getInvokeExpr();
-            } else if (stmt instanceof JAssignStmt && ((JAssignStmt) stmt).getRightOp() instanceof AbstractInvokeExpr) {
-                invokeExpr = (AbstractInvokeExpr) ((JAssignStmt) stmt).getRightOp();
-            }
 
+            // Case 3: Interprocedural Call site
             if (invokeExpr != null) {
-                String calleeSig = invokeExpr.getMethodSignature().toString();
-                String sinkRisk = matchCatalog(calleeSig, sinkCatalog);
+                MethodSignature calleeSig = invokeExpr.getMethodSignature();
+                
+                // Check if any argument is tainted
+                List<Integer> taintedArgIndices = new ArrayList<>();
+                List<Object> args = invokeExpr.getArgs();
+                for (int i = 0; i < args.size(); i++) {
+                    String argStr = args.get(i).toString();
+                    for (String tainted : taintedLocals) {
+                        if (Pattern.compile("\\b" + Pattern.quote(tainted) + "\\b").matcher(argStr).find()) {
+                            taintedArgIndices.add(i);
+                            break;
+                        }
+                    }
+                }
 
-                if (sinkRisk != null) {
-                    // Check if any argument is tainted
-                    for (Object arg : invokeExpr.getArgs()) {
-                        String argStr = arg.toString();
-                        for (String tainted : taintedLocals) {
-                            if (argStr.contains(tainted)) {
-                                // Match! Taint propagated into a Sink argument!
-                                List<String> path = new ArrayList<>(taintPaths.get(tainted));
-                                path.add(calleeSig);
+                if (!taintedArgIndices.isEmpty()) {
+                    // Check if callee signature is a direct sink
+                    String sinkRisk = matchCatalog(calleeSig, sinks);
+                    if (sinkRisk != null) {
+                        List<String> fullPath = new ArrayList<>(currentPath);
+                        fullPath.add(calleeSig.toString());
+                        
+                        TaintChain tc = new TaintChain(
+                            currentPath.get(0),
+                            sources.getOrDefault(currentPath.get(0), "VARIABLE"),
+                            calleeSig.toString(),
+                            sinkRisk,
+                            fullPath
+                        );
+                        
+                        // TASK 4: Confidence scoring heuristic
+                        String confidence = (fullPath.size() <= 3) ? "high" : "medium";
+                        tc.setConfidence(confidence);
 
-                                methodFindings.add(new TaintChain(
-                                    path.get(0), 
-                                    matchCatalog(path.get(0), sourceCatalog) != null ? matchCatalog(path.get(0), sourceCatalog) : "VARIABLE",
-                                    calleeSig, 
-                                    sinkRisk, 
-                                    path
-                                ));
+                        // Deduplicate findings
+                        boolean isDup = false;
+                        for (TaintChain f : findings) {
+                            if (f.getSource().equals(tc.getSource()) && f.getSink().equals(tc.getSink())) {
+                                isDup = true;
                                 break;
                             }
                         }
+                        if (!isDup) {
+                            findings.add(tc);
+                        }
+                    }
+
+                    // Recursively propagate parameter taint inside callee
+                    SootMethod calleeMethod = allMethods.get(calleeSig.toString());
+                    if (calleeMethod != null && calleeMethod.getBody() != null) {
+                        String calleeKey = calleeSig.toString();
+                        if (visited.add(calleeKey)) {
+                            // Find matching parameter locals inside callee
+                            Set<String> calleeTaintedLocals = new HashSet<>();
+                            StmtGraph<?> calleeGraph = calleeMethod.getBody().getStmtGraph();
+                            for (Stmt calleeStmt : calleeGraph.getStmts()) {
+                                if (calleeStmt instanceof JAssignStmt) {
+                                    JAssignStmt cAssign = (JAssignStmt) calleeStmt;
+                                    String rightOp = cAssign.getRightOp().toString();
+                                    for (int tIdx : taintedArgIndices) {
+                                        if (rightOp.contains("@parameter" + tIdx)) {
+                                            calleeTaintedLocals.add(cAssign.getLeftOp().toString());
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!calleeTaintedLocals.isEmpty()) {
+                                List<String> calleePath = new ArrayList<>(currentPath);
+                                calleePath.add(calleeSig.toString());
+
+                                boolean calleeReturnsTaint = propagateTaintRecursive(
+                                    calleeMethod,
+                                    calleeTaintedLocals,
+                                    calleePath,
+                                    depth + 1,
+                                    allMethods,
+                                    sources,
+                                    sinks,
+                                    sanitizers,
+                                    findings,
+                                    visited
+                                );
+
+                                // If callee return value can be tainted, taint caller's receiving variable
+                                if (calleeReturnsTaint && stmt instanceof JAssignStmt) {
+                                    taintedLocals.add(((JAssignStmt) stmt).getLeftOp().toString());
+                                }
+                            }
+                            visited.remove(calleeKey);
+                        }
+                    }
+                }
+            }
+
+            // Case 4: Return stmt check
+            if (stmt.toString().startsWith("return ")) {
+                String retVal = stmt.toString().substring(7).replace(";", "").trim();
+                for (String tainted : taintedLocals) {
+                    if (retVal.equals(tainted)) {
+                        returnsTaintedLocal = true;
+                        break;
                     }
                 }
             }
         }
 
-        return methodFindings;
+        return returnsTaintedLocal;
     }
 
-    private String matchCatalog(String sig, Map<String, String> catalog) {
+    private boolean signatureMatchesPattern(MethodSignature sig, String pattern) {
+        String sigStr = sig.toString();
+        if (pattern.endsWith(".*")) {
+            String pkgPrefix = pattern.substring(0, pattern.length() - 2);
+            return sig.getDeclClassType().toString().startsWith(pkgPrefix);
+        }
+        int lastDot = pattern.lastIndexOf('.');
+        if (lastDot > 0) {
+            String className = pattern.substring(0, lastDot);
+            String methodName = pattern.substring(lastDot + 1);
+            return sig.getDeclClassType().toString().equals(className) && sig.getName().equals(methodName);
+        }
+        return sigStr.contains(pattern);
+    }
+
+    private String matchCatalog(MethodSignature sig, Map<String, String> catalog) {
         for (Map.Entry<String, String> entry : catalog.entrySet()) {
-            if (sig.contains(entry.getKey())) return entry.getValue();
+            if (signatureMatchesPattern(sig, entry.getKey())) {
+                return entry.getValue();
+            }
         }
         return null;
     }

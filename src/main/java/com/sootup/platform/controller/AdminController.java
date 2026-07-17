@@ -372,6 +372,43 @@ public class AdminController {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // Live Sanitizer Catalog — PUT /api/v1/admin/sanitizer-catalog
+    //                          GET  /api/v1/admin/sanitizer-catalog
+    // ══════════════════════════════════════════════════════════════════════════
+    @PutMapping("/admin/sanitizer-catalog")
+    public ResponseEntity<?> updateSanitizerCatalog(
+            @RequestHeader(value = "X-Danger-Mode", required = false) String dangerMode,
+            @RequestBody Map<String, Object> body) {
+        
+        if (!"confirmed".equals(dangerMode)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Danger Mode must be unlocked and confirmed."));
+        }
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, String>> rules = (List<Map<String, String>>) body.getOrDefault("rules", List.of());
+        analysisService.getSanitizerCatalog().clear();
+        for (Map<String, String> rule : rules) {
+            String pattern = rule.get("pattern");
+            String category = rule.get("sanitizerCategory");
+            if (pattern != null) {
+                analysisService.getSanitizerCatalog().put(pattern, category != null ? category : "DEFAULT");
+            }
+        }
+        return ResponseEntity.ok(Map.of(
+            "status", "reloaded",
+            "rulesLoaded", analysisService.getSanitizerCatalog().size()
+        ));
+    }
+
+    @GetMapping("/admin/sanitizer-catalog")
+    public ResponseEntity<?> getSanitizerCatalog() {
+        List<Map<String, String>> rules = analysisService.getSanitizerCatalog().entrySet().stream()
+            .map(e -> Map.of("pattern", e.getKey(), "sanitizerCategory", e.getValue()))
+            .collect(Collectors.toList());
+        return ResponseEntity.ok(Map.of("rules", rules, "count", rules.size()));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // GM-4: Cross-Job Global Search — GET /api/v1/admin/search?q=
     // ══════════════════════════════════════════════════════════════════════════
     @GetMapping("/admin/search")

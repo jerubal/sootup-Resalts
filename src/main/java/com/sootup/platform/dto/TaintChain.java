@@ -40,6 +40,10 @@ public class TaintChain {
     /** Risk multiplier from the matching business tag (default 1.0 = no boost). */
     private double businessMultiplier = 1.0;
 
+    // TASK 4: Confidence scoring
+    /** Confidence of the taint chain finding ("high" | "medium"). */
+    private String confidence = "high";
+
     public TaintChain(String source, String sourceCategory,
                       String sink, String sinkRiskCategory,
                       List<String> path) {
@@ -63,4 +67,8 @@ public class TaintChain {
     public void setBusinessTag(String businessTag) { this.businessTag = businessTag; }
     public double getBusinessMultiplier() { return businessMultiplier; }
     public void setBusinessMultiplier(double businessMultiplier) { this.businessMultiplier = businessMultiplier; }
+
+    // TASK 4 getters/setters
+    public String getConfidence() { return confidence; }
+    public void setConfidence(String confidence) { this.confidence = confidence; }
 }

@@ -52,6 +52,11 @@
             <artifactId>sootup.callgraph</artifactId>
             <version>${sootup.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.soot-oss</groupId>
+            <artifactId>sootup.qilin</artifactId>
+            <version>${sootup.version}</version>
+        </dependency>
 
         <!-- Testing -->
         <dependency>
