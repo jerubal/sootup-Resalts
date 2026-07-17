@@ -73,6 +73,113 @@ function RiskGauge({ jobs }) {
   );
 }
 
+/* ── FR-O: Cross-Target Portfolio View ───────────────────────────────── */
+function PortfolioView({ jobs }) {
+  const completed = jobs.filter(j => j.status === 'COMPLETED');
+  if (completed.length === 0) return null;
+
+  // 1. Unique targets count
+  const uniqueTargets = new Set(completed.map(j => targetName(j.targetPath))).size;
+
+  // 2. Aggregated taint chains
+  const totalTaints = completed.reduce((s, j) => s + (j.taintChains?.length || 0), 0);
+
+  // 3. Average scan duration
+  const totalDurationMs = completed.reduce((s, j) => {
+    const end = j.completedAt || Date.now();
+    return s + (end - j.submittedAt);
+  }, 0);
+  const avgDurationSec = Math.round((totalDurationMs / completed.length) / 1000);
+  const avgDurationStr = avgDurationSec < 60 ? `${avgDurationSec}s` : `${Math.floor(avgDurationSec / 60)}m ${avgDurationSec % 60}s`;
+
+  // 4. Highest Risk Category
+  const categoryCounts = {};
+  completed.forEach(j => {
+    (j.taintChains || []).forEach(tc => {
+      const cat = tc.sinkRiskCategory || 'UNKNOWN';
+      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+    });
+  });
+  let highestCategory = 'NONE';
+  let highestCount = 0;
+  Object.entries(categoryCounts).forEach(([cat, count]) => {
+    if (count > highestCount) {
+      highestCount = count;
+      highestCategory = cat;
+    }
+  });
+
+  // 5. Recent Scan Trends (last 6 completed jobs)
+  const recentJobs = [...completed].sort((a, b) => a.submittedAt - b.submittedAt).slice(-6);
+  const maxChains = Math.max(...recentJobs.map(j => j.taintChains?.length || 0), 1);
+
+  return (
+    <Card style={{ padding: 18, background: '#0a0a14', border: '1px solid #1f1f2e', marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid #1a1a26', paddingBottom: 10, marginBottom: 16 }}>
+        <Shield size={16} color="var(--accent)" />
+        <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '0.06em' }}>
+          Portfolio Security Scan Metrics (FR-O)
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+        {/* Core Stats Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ background: '#12121f', padding: 12, borderRadius: 8, border: '1px solid #1e1e2d' }}>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>Unique Targets</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#38bdf8' }}>{uniqueTargets}</div>
+          </div>
+          <div style={{ background: '#12121f', padding: 12, borderRadius: 8, border: '1px solid #1e1e2d' }}>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>Total Taint Flows</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#f59e0b' }}>{totalTaints}</div>
+          </div>
+          <div style={{ background: '#12121f', padding: 12, borderRadius: 8, border: '1px solid #1e1e2d' }}>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>Avg Scan Time</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#34d399' }}>{avgDurationStr}</div>
+          </div>
+          <div style={{ background: '#12121f', padding: 12, borderRadius: 8, border: '1px solid #1e1e2d', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>Highest Threat</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#ef4444', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={highestCategory}>
+              {highestCategory.replace('_', ' ')}
+            </div>
+          </div>
+        </div>
+
+        {/* Taint Flow Trend Sparkline */}
+        <div style={{ background: '#12121f', padding: 14, borderRadius: 8, border: '1px solid #1e1e2d', display: 'flex', flexDirection: 'column', justifyBetween: 'center' }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+            <span>Taint Flow Trend</span>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>last {recentJobs.length} scans</span>
+          </div>
+          {recentJobs.length < 2 ? (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+              Scan more targets to populate trend graph
+            </div>
+          ) : (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', height: 50, gap: 8, padding: '0 8px' }}>
+              {recentJobs.map((j, i) => {
+                const count = j.taintChains?.length || 0;
+                const hPct = Math.max(10, Math.min(100, (count / maxChains) * 100));
+                return (
+                  <div key={j.jobId} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: count > 0 ? '#ef4444' : 'var(--text-muted)' }}>{count}</div>
+                    <div style={{
+                      width: '100%', height: `${hPct}%`, minHeight: 4,
+                      background: count > 0 ? 'linear-gradient(to top, #ef4444, #f97316)' : 'var(--bg-border)',
+                      borderRadius: '3px 3px 0 0',
+                    }} title={`Job ${j.jobId.slice(0,6)}: ${count} taints`} />
+                    <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase' }}>S{i+1}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 /* ── UI-2: Living Job Status Strip ────────────────────────────────────── */
 function LiveStatusStrip({ jobs }) {
   const running = jobs.filter(j => j.status === 'RUNNING');
@@ -204,8 +311,9 @@ export function Dashboard() {
 
       {/* Risk gauge row */}
       {jobs.some(j => j.status === 'COMPLETED') && (
-        <div style={{ marginBottom: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
           <RiskGauge jobs={jobs} />
+          <PortfolioView jobs={jobs} />
         </div>
       )}
 
