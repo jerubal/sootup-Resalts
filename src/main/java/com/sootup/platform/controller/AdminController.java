@@ -60,6 +60,52 @@ public class AdminController {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // FR-M: Business-Context Tags — POST /api/v1/analyses/{jobId}/tags
+    //                               GET  /api/v1/analyses/{jobId}/tags
+    //                               DELETE /api/v1/analyses/{jobId}/tags/{pattern}
+    // ══════════════════════════════════════════════════════════════════════════
+    @PostMapping("/analyses/{jobId}/tags")
+    public ResponseEntity<?> addTag(@PathVariable String jobId, @RequestBody Map<String, Object> body) {
+        Optional<AnalysisJob> opt = jobStore.get(jobId);
+        if (opt.isEmpty()) return ResponseEntity.notFound().build();
+
+        AnalysisJob job = opt.get();
+        String pattern = String.valueOf(body.getOrDefault("pattern", "")).trim();
+        String label   = String.valueOf(body.getOrDefault("label",   "business-critical")).trim();
+        double multiplier = Double.parseDouble(String.valueOf(body.getOrDefault("multiplier", "2.0")));
+
+        if (pattern.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "pattern required"));
+
+        Map<String, Object> tag = new LinkedHashMap<>();
+        tag.put("label",      label);
+        tag.put("multiplier", multiplier);
+        job.getBusinessTags().put(pattern, tag);
+
+        // Invalidate cached taint chains so they're re-scored on next fetch
+        job.setTaintChains(null);
+
+        return ResponseEntity.ok(Map.of("pattern", pattern, "tag", tag, "totalTags", job.getBusinessTags().size()));
+    }
+
+    @GetMapping("/analyses/{jobId}/tags")
+    public ResponseEntity<?> getTags(@PathVariable String jobId) {
+        Optional<AnalysisJob> opt = jobStore.get(jobId);
+        if (opt.isEmpty()) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(opt.get().getBusinessTags());
+    }
+
+    @DeleteMapping("/analyses/{jobId}/tags/{pattern}")
+    public ResponseEntity<?> deleteTag(@PathVariable String jobId, @PathVariable String pattern) {
+        Optional<AnalysisJob> opt = jobStore.get(jobId);
+        if (opt.isEmpty()) return ResponseEntity.notFound().build();
+        AnalysisJob job = opt.get();
+        job.getBusinessTags().remove(pattern);
+        job.setTaintChains(null); // re-score on next fetch
+        return ResponseEntity.ok(Map.of("removed", pattern, "remaining", job.getBusinessTags().size()));
+    }
+
+
+    // ══════════════════════════════════════════════════════════════════════════
     // FR-J: Natural-Language Query Bridge — POST /api/v1/analyses/{jobId}/query/nl
     // ══════════════════════════════════════════════════════════════════════════
     @PostMapping("/analyses/{jobId}/query/nl")

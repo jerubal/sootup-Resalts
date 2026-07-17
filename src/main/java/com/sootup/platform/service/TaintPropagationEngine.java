@@ -63,6 +63,32 @@ public class TaintPropagationEngine {
             });
         }
 
+        // FR-M: Apply business-context risk multipliers
+        Map<String, Map<String, Object>> businessTags = job.getBusinessTags();
+        if (businessTags != null && !businessTags.isEmpty()) {
+            for (TaintChain chain : findings) {
+                String sinkSig  = chain.getSink()   != null ? chain.getSink()   : "";
+                String srcSig   = chain.getSource() != null ? chain.getSource() : "";
+                for (Map.Entry<String, Map<String, Object>> tagEntry : businessTags.entrySet()) {
+                    String pat = tagEntry.getKey();
+                    if (sinkSig.contains(pat) || srcSig.contains(pat)) {
+                        Map<String, Object> tagData = tagEntry.getValue();
+                        double multiplier = Double.parseDouble(String.valueOf(tagData.getOrDefault("multiplier", "1.0")));
+                        String tagLabel   = String.valueOf(tagData.getOrDefault("label", "business-critical"));
+                        chain.setBusinessTag(tagLabel);
+                        chain.setBusinessMultiplier(multiplier);
+                        break; // first matching tag wins
+                    }
+                }
+            }
+            // Re-sort: business-tagged chains to the top
+            findings.sort((a, b) -> {
+                double ma = a.getBusinessMultiplier();
+                double mb = b.getBusinessMultiplier();
+                return Double.compare(mb, ma);
+            });
+        }
+
         return findings;
     }
 

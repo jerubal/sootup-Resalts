@@ -33,6 +33,13 @@ public class TaintChain {
     /** Number of call hops from source to sink (= path.size() - 1). */
     private int hopCount;
 
+    // FR-M: Business-context risk weighting
+    /** Human-readable label from the matching business tag (e.g. "handles payment data"). */
+    private String businessTag;
+
+    /** Risk multiplier from the matching business tag (default 1.0 = no boost). */
+    private double businessMultiplier = 1.0;
+
     public TaintChain(String source, String sourceCategory,
                       String sink, String sinkRiskCategory,
                       List<String> path) {
@@ -50,4 +57,10 @@ public class TaintChain {
     public String getSinkRiskCategory() { return sinkRiskCategory; }
     public List<String> getPath() { return path; }
     public int getHopCount() { return hopCount; }
+
+    // FR-M getters/setters
+    public String getBusinessTag() { return businessTag; }
+    public void setBusinessTag(String businessTag) { this.businessTag = businessTag; }
+    public double getBusinessMultiplier() { return businessMultiplier; }
+    public void setBusinessMultiplier(double businessMultiplier) { this.businessMultiplier = businessMultiplier; }
 }

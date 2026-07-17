@@ -10,7 +10,8 @@ import { TaintViewer } from './TaintViewer';
 import { CrossRefViewer } from './CrossRefViewer';
 import { PentestReportGenerator } from './PentestReportGenerator';
 import { GodModeConsole } from './GodModeConsole';
-import { Network, GitBranch, Code2, Download, Cpu, Box, ArrowLeft, AlertCircle, ShieldAlert, FileSearch, FileText, Terminal } from 'lucide-react';
+import { BusinessTagManager } from './BusinessTagManager';
+import { Network, GitBranch, Code2, Download, Cpu, Box, ArrowLeft, AlertCircle, ShieldAlert, FileSearch, FileText, Terminal, Tag } from 'lucide-react';
 
 
 
@@ -85,13 +86,14 @@ export function JobDetail() {
   const cgMethods = result ? [] : [];
 
   const tabs = [
-    { id: 'callgraph', label: 'Call Graph', icon: Network },
-    { id: 'cfg',       label: 'CFG Browser', icon: GitBranch },
-    { id: 'jimple',    label: 'Jimple IR', icon: Code2 },
+    { id: 'callgraph', label: 'Call Graph',     icon: Network },
+    { id: 'cfg',       label: 'CFG Browser',    icon: GitBranch },
+    { id: 'jimple',    label: 'Jimple IR',      icon: Code2 },
     { id: 'taint',     label: 'Taint Analysis', icon: ShieldAlert },
-    { id: 'crossref',  label: 'MobSF Cross-Ref', icon: FileSearch },
-    { id: 'report',    label: 'Audit Report', icon: FileText },
-    { id: 'godmode',   label: 'God Mode', icon: Terminal },
+    { id: 'tags',      label: 'Risk Tags',      icon: Tag },
+    { id: 'crossref',  label: 'MobSF Cross-Ref',icon: FileSearch },
+    { id: 'report',    label: 'Audit Report',   icon: FileText },
+    { id: 'godmode',   label: 'God Mode',       icon: Terminal },
   ];
 
   return (
@@ -207,6 +209,7 @@ export function JobDetail() {
             )}
             {tab === 'report' && <PentestReportGenerator jobId={jobId} />}
             {tab === 'godmode' && <GodModeConsole jobId={jobId} />}
+            {tab === 'tags' && <BusinessTagManager jobId={jobId} />}
 
 
 

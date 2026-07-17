@@ -118,6 +118,16 @@ export function TaintViewer({ jobId, onSelectPath }) {
                 <div style={{ fontSize: 11, color: 'var(--text-primary)', wordBreak: 'break-all', fontFamily: 'JetBrains Mono, monospace' }}>
                   Source: {chain.source.split(':').pop()?.replace('>', '')}
                 </div>
+                {chain.businessTag && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                      background: 'rgba(234,179,8,0.15)', color: '#eab308',
+                      border: '1px solid rgba(234,179,8,0.3)'
+                    }}>⚡ {chain.businessTag}</span>
+                    <span style={{ fontSize: 9, color: '#eab308' }}>×{chain.businessMultiplier}</span>
+                  </div>
+                )}
               </button>
             );
           })}
@@ -129,7 +139,7 @@ export function TaintViewer({ jobId, onSelectPath }) {
         {selectedChain !== null ? (
           <div>
             {/* Header info */}
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20 }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' }}>
               <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Taint Source</span>
                 <span style={{ fontSize: 12, fontFamily: 'JetBrains Mono', color: 'var(--text-primary)' }}>{chains[selectedChain].source}</span>
@@ -141,6 +151,16 @@ export function TaintViewer({ jobId, onSelectPath }) {
                 <span style={{ fontSize: 12, fontFamily: 'JetBrains Mono', color: 'var(--text-primary)' }}>{chains[selectedChain].sink}</span>
                 <span style={{ fontSize: 9, color: '#ef4444' }}>Risk: {chains[selectedChain].sinkRiskCategory}</span>
               </div>
+              {chains[selectedChain].businessTag && (
+                <div style={{
+                  background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.3)',
+                  borderRadius: 8, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 4
+                }}>
+                  <span style={{ fontSize: 10, color: '#eab308', textTransform: 'uppercase', fontWeight: 700 }}>⚡ Business Context</span>
+                  <span style={{ fontSize: 12, color: '#eab308', fontWeight: 600 }}>{chains[selectedChain].businessTag}</span>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>×{chains[selectedChain].businessMultiplier} risk multiplier</span>
+                </div>
+              )}
             </div>
 
             {/* Playback Controls */}

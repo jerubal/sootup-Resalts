@@ -42,4 +42,9 @@ export const api = {
 
   /* ── GM-4/6/8: Admin GET endpoints ─────────────────────────────── */
   get:  (path)       => request(`${API_HOST}/api/v1${path}`, 'GET'),
+
+  /* ── FR-M: Business-Context Tags ───────────────────────────────────── */
+  getTags:   (jobId)         => request(`${API_HOST}/api/v1/analyses/${jobId}/tags`).then(r => r.data),
+  addTag:    (jobId, body)   => request(`${API_HOST}/api/v1/analyses/${jobId}/tags`, 'POST', body).then(r => r.data),
+  deleteTag: (jobId, pat)    => request(`${API_HOST}/api/v1/analyses/${jobId}/tags/${encodeURIComponent(pat)}`, 'DELETE').then(r => r.data),
 };

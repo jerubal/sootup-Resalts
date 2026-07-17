@@ -33,6 +33,8 @@ public class AnalysisJob {
     private List<String> policyViolations = new ArrayList<>();
     private List<Map<String, Object>> externalVulnerabilities = new ArrayList<>();
     private List<Map<String, Object>> customTaintRules = new ArrayList<>();
+    // FR-M: Business-context risk tags { classPattern -> { label, multiplier } }
+    private Map<String, Map<String, Object>> businessTags = new java.util.concurrent.ConcurrentHashMap<>();
 
     public AnalysisJob(String jobId, AnalysisRequest request) {
         this.jobId = jobId;
@@ -158,5 +160,14 @@ public class AnalysisJob {
 
     public void setCustomTaintRules(List<Map<String, Object>> customTaintRules) {
         this.customTaintRules = customTaintRules;
+    }
+
+    // FR-M: Business tag getters/setters
+    public Map<String, Map<String, Object>> getBusinessTags() {
+        return businessTags;
+    }
+
+    public void setBusinessTags(Map<String, Map<String, Object>> businessTags) {
+        this.businessTags = businessTags;
     }
 }
