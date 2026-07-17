@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Btn } from './ui';
-import { Terminal, ShieldAlert, Plus, Trash, Play, Save, Cpu, Database, Layers, AlertCircle, Bookmark, RefreshCw } from 'lucide-react';
+import { Terminal, ShieldAlert, Plus, Trash, Play, Save, Cpu, Database, Layers, AlertCircle, Bookmark, RefreshCw, MessageSquare, Code2 } from 'lucide-react';
 import { api } from '../api';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -34,6 +34,7 @@ function QueryConsole({ jobId }) {
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggest, setShowSuggest] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [nlMode, setNlMode] = useState(false); // FR-J: Natural-Language mode toggle
   const logsRef = useRef(null);
 
   useEffect(() => {
@@ -49,12 +50,19 @@ function QueryConsole({ jobId }) {
     setHistIdx(-1);
     setQuery('');
     setShowSuggest(false);
-    addLog([{ type: 'input', msg: q }]);
+    addLog([{ type: 'input', msg: (nlMode ? '🗣 ' : '') + q }]);
     setLoading(true);
 
     try {
       if (jobId) {
-        const res = await api.post(`/analyses/${jobId}/query`, { query: q });
+        const endpoint = nlMode ? `/analyses/${jobId}/query/nl` : `/analyses/${jobId}/query`;
+        const res = await api.post(endpoint, { query: q });
+        
+        // FR-J: If NL mode, show the translated DSL back to the user
+        if (nlMode && res.data.translatedQuery) {
+          addLog([{ type: 'muted', msg: `↳ Translated DSL: ${res.data.translatedQuery}` }]);
+        }
+        
         if (res.data.results && res.data.results.length > 0) {
           addLog([
             { type: 'success', msg: `→ ${res.data.count} result(s):` },
@@ -119,6 +127,30 @@ function QueryConsole({ jobId }) {
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '0.06em', flex: 1 }}>
           REPL Console {jobId ? `· job:${jobId}` : '· global'}
         </span>
+
+        {/* FR-J: Natural-Language Mode Toggle */}
+        <button
+          onClick={() => {
+            const next = !nlMode;
+            setNlMode(next);
+            addLog([{ type: 'system', msg: next
+              ? '🗣 NL mode ON — type plain English, DSL translation shown'
+              : '💻 DSL mode ON — direct query syntax' }]);
+          }}
+          title={nlMode ? 'Switch to DSL mode' : 'Switch to plain-English mode (FR-J)'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            background: nlMode ? 'rgba(99,102,241,0.15)' : 'transparent',
+            border: `1px solid ${nlMode ? '#6366f1' : '#1a1a24'}`,
+            borderRadius: 6, padding: '3px 10px', cursor: 'pointer',
+            color: nlMode ? '#818cf8' : 'var(--text-muted)', fontSize: 10, fontWeight: 600,
+            transition: 'all 0.2s',
+          }}
+        >
+          {nlMode ? <MessageSquare size={11} /> : <Code2 size={11} />}
+          {nlMode ? 'Plain English' : 'DSL'}
+        </button>
+
         <button onClick={() => setLogs([{ type: 'system', msg: 'Console cleared.' }])}
           style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 10 }}>
           clear
@@ -147,7 +179,7 @@ function QueryConsole({ jobId }) {
 
       {/* Input */}
       <div style={{ position: 'relative', marginTop: 10 }}>
-        {showSuggest && (
+        {showSuggest && !nlMode && (
           <div style={{
             position: 'absolute', bottom: '110%', left: 0, right: 0,
             background: '#13131d', border: '1px solid #1e1e2e', borderRadius: 6, overflow: 'hidden', zIndex: 10,
@@ -168,23 +200,26 @@ function QueryConsole({ jobId }) {
           </div>
         )}
         <div style={{ display: 'flex', gap: 8 }}>
-          <span style={{ color: '#6366f1', fontFamily: 'JetBrains Mono', fontSize: 13, lineHeight: '34px', flexShrink: 0 }}>❯</span>
+          <span style={{ color: nlMode ? '#818cf8' : '#6366f1', fontFamily: 'JetBrains Mono', fontSize: 13, lineHeight: '34px', flexShrink: 0 }}>{nlMode ? '🗣' : '❯'}</span>
           <input
-            placeholder='sinks where category = "SQL_INJECTION"'
+            placeholder={nlMode
+              ? 'Ask in plain English: "show me all SQL injection sinks"'
+              : 'sinks where category = "SQL_INJECTION"'}
             value={query}
             onChange={e => onQueryChange(e.target.value)}
             onKeyDown={onKeyDown}
             style={{
-              flex: 1, background: '#0d0d17', border: '1px solid #1a1a24',
+              flex: 1, background: nlMode ? '#0d0d1f' : '#0d0d17',
+              border: `1px solid ${nlMode ? '#2a1e4e' : '#1a1a24'}`,
               borderRadius: 6, padding: '7px 12px', color: '#e2e8f0',
-              fontSize: 12, fontFamily: 'JetBrains Mono', outline: 'none',
-              transition: 'border-color 0.15s',
+              fontSize: 12, fontFamily: nlMode ? 'Inter, sans-serif' : 'JetBrains Mono',
+              outline: 'none', transition: 'border-color 0.15s',
             }}
-            onFocus={e => e.target.style.borderColor = '#4f46e5'}
-            onBlur={e => e.target.style.borderColor = '#1a1a24'}
+            onFocus={e => e.target.style.borderColor = nlMode ? '#6366f1' : '#4f46e5'}
+            onBlur={e => e.target.style.borderColor = nlMode ? '#2a1e4e' : '#1a1a24'}
           />
-          <Btn variant="primary" onClick={executeQuery} style={{ gap: 6, flexShrink: 0 }}>
-            <Play size={12} /> Run
+          <Btn variant="primary" onClick={executeQuery} style={{ gap: 6, flexShrink: 0, background: nlMode ? '#4f46e5' : undefined }}>
+            {nlMode ? <MessageSquare size={12} /> : <Play size={12} />} {nlMode ? 'Ask' : 'Run'}
           </Btn>
         </div>
       </div>

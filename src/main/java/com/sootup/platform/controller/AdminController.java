@@ -4,9 +4,14 @@ import com.sootup.platform.model.AnalysisJob;
 import com.sootup.platform.service.JobStore;
 import com.sootup.platform.service.SootUpAnalysisService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.*;
+import java.net.*;
+import java.net.http.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -28,6 +33,12 @@ public class AdminController {
     @Autowired private JobStore jobStore;
     @Autowired private SootUpAnalysisService analysisService;
 
+    @Value("${llm.api.key:}")
+    private String llmApiKey;
+
+    @Value("${llm.api.url:https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent}")
+    private String llmApiUrl;
+
     // ── Persisted state ──────────────────────────────────────────────────────
     private final Map<String, List<Map<String, Object>>> webhooks = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> bookmarks = new java.util.concurrent.ConcurrentHashMap<>();
@@ -46,6 +57,143 @@ public class AdminController {
 
         List<Map<String, Object>> results = executeQuery(job, q);
         return ResponseEntity.ok(Map.of("query", q, "results", results, "count", results.size()));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // FR-J: Natural-Language Query Bridge — POST /api/v1/analyses/{jobId}/query/nl
+    // ══════════════════════════════════════════════════════════════════════════
+    @PostMapping("/analyses/{jobId}/query/nl")
+    public ResponseEntity<?> queryNaturalLanguage(@PathVariable String jobId,
+                                                  @RequestBody Map<String, String> body) {
+        Optional<AnalysisJob> opt = jobStore.get(jobId);
+        if (opt.isEmpty()) return ResponseEntity.notFound().build();
+
+        AnalysisJob job = opt.get();
+        String nlInput = body.getOrDefault("query", "").trim();
+        if (nlInput.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Empty query"));
+
+        String translatedDsl;
+        try {
+            translatedDsl = translateToDsl(nlInput);
+        } catch (Exception e) {
+            return ResponseEntity.status(502).body(Map.of(
+                "error", "LLM translation failed: " + e.getMessage(),
+                "hint", "Set llm.api.key in application.properties or LLM_API_KEY env variable."
+            ));
+        }
+
+        List<Map<String, Object>> results = executeQuery(job, translatedDsl);
+        return ResponseEntity.ok(Map.of(
+            "naturalLanguage", nlInput,
+            "translatedQuery", translatedDsl,
+            "results", results,
+            "count", results.size()
+        ));
+    }
+
+    /**
+     * Translates a plain-English query into the SootUp DSL using an LLM.
+     * Calls the Gemini API if llm.api.key is configured; otherwise returns a
+     * best-effort rule-based translation so the feature degrades gracefully.
+     */
+    private String translateToDsl(String nlInput) throws Exception {
+        if (llmApiKey == null || llmApiKey.isBlank()) {
+            // Graceful degradation: simple keyword-based rules
+            return heuristicNlToDsl(nlInput);
+        }
+
+        String dslGrammar = """
+            DSL Grammar:
+            - sinks                                  — list all sink nodes
+            - sinks where category = "X"             — filter by risk category (SQL_INJECTION, COMMAND_INJECTION, INSECURE_DESERIALIZATION, JNDI_INJECTION, XML_INJECTION, WEAK_CRYPTO, CODE_INJECTION, REFLECTION)
+            - sources                                 — list all taint source nodes
+            - classes                                 — list all loaded Java classes
+            - taint                                   — list all taint chains (source → sink paths)
+            - callers of <pattern>                    — find all callers of methods matching pattern
+            - policy                                  — list policy violations
+            - help                                    — show this help
+            """;
+
+        String prompt = String.format("""
+            You are a query translator for a Java static analysis tool.
+            Translate the following natural-language query into EXACTLY ONE line of DSL. Output ONLY the DSL string, nothing else.
+
+            %s
+
+            Natural-language input: "%s"
+
+            DSL output:""", dslGrammar, nlInput);
+
+        // Build Gemini API request
+        String requestBody = "{\"contents\":[{\"parts\":[{\"text\":" +
+            "\"" + prompt.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""}]}]}";
+
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest req = HttpRequest.newBuilder()
+            .uri(URI.create(llmApiUrl + "?key=" + llmApiKey))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
+            .build();
+
+        HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() != 200) {
+            throw new RuntimeException("LLM API error: HTTP " + resp.statusCode());
+        }
+
+        // Extract text from Gemini response: candidates[0].content.parts[0].text
+        String json = resp.body();
+        int textStart = json.indexOf("\"text\"");
+        if (textStart < 0) throw new RuntimeException("Unexpected LLM response format");
+        int quoteOpen = json.indexOf('"', textStart + 7);
+        int quoteClose = json.indexOf('"', quoteOpen + 1);
+        // Handle multi-char extraction properly
+        String raw = extractJsonStringValue(json, "text");
+        return raw.strip().replace("\\n", " ").replaceAll("^`+|`+$", "").strip();
+    }
+
+    /** Extract a JSON string value by key (simple, no library dependency). */
+    private String extractJsonStringValue(String json, String key) {
+        String search = "\"" + key + "\"";
+        int idx = json.indexOf(search);
+        if (idx < 0) return "help";
+        int colon = json.indexOf(':', idx + search.length());
+        int open = json.indexOf('"', colon + 1);
+        if (open < 0) return "help";
+        StringBuilder sb = new StringBuilder();
+        boolean escape = false;
+        for (int i = open + 1; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (escape) { sb.append(c); escape = false; }
+            else if (c == '\\') escape = true;
+            else if (c == '"') break;
+            else sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    /** Heuristic fallback when no LLM API key is configured. */
+    private String heuristicNlToDsl(String input) {
+        String lower = input.toLowerCase();
+        if (lower.contains("sql") && (lower.contains("inject") || lower.contains("sink"))) return "sinks where category = \"SQL_INJECTION\"";
+        if (lower.contains("command") && lower.contains("inject")) return "sinks where category = \"COMMAND_INJECTION\"";
+        if (lower.contains("deserializ")) return "sinks where category = \"INSECURE_DESERIALIZATION\"";
+        if (lower.contains("jndi")) return "sinks where category = \"JNDI_INJECTION\"";
+        if (lower.contains("crypto") || lower.contains("cipher") || lower.contains("weak")) return "sinks where category = \"WEAK_CRYPTO\"";
+        if (lower.contains("sink")) return "sinks";
+        if (lower.contains("source") || lower.contains("entry") || lower.contains("input")) return "sources";
+        if (lower.contains("taint") || lower.contains("flow") || lower.contains("chain") || lower.contains("attack path")) return "taint";
+        if (lower.contains("class")) return "classes";
+        if (lower.contains("caller") || lower.contains("who call")) {
+            String[] words = lower.split("\\s+");
+            for (int i = 0; i < words.length - 1; i++) {
+                if (words[i].equals("of") || words[i].equals("calls") || words[i].equals("calling")) {
+                    return "callers of " + words[i + 1];
+                }
+            }
+            return "callers of Runtime";
+        }
+        if (lower.contains("polic") || lower.contains("violation")) return "policy";
+        return "help";
     }
 
     private List<Map<String, Object>> executeQuery(AnalysisJob job, String q) {
