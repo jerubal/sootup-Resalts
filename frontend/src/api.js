@@ -47,4 +47,7 @@ export const api = {
   getTags:   (jobId)         => request(`${API_HOST}/api/v1/analyses/${jobId}/tags`).then(r => r.data),
   addTag:    (jobId, body)   => request(`${API_HOST}/api/v1/analyses/${jobId}/tags`, 'POST', body).then(r => r.data),
   deleteTag: (jobId, pat)    => request(`${API_HOST}/api/v1/analyses/${jobId}/tags/${encodeURIComponent(pat)}`, 'DELETE').then(r => r.data),
+
+  /* ── FR-N: Signed Reports Verification ─────────────────────────────── */
+  verifyReport: (content)    => request(`${API_HOST}/api/v1/analyses/verify`, 'POST', { content }).then(r => r.data),
 };

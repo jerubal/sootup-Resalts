@@ -10,6 +10,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.*;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -19,6 +21,18 @@ public class AnalysisController {
 
     private final JobStore jobStore;
     private final SootUpAnalysisService analysisService;
+
+    // FR-N: Cryptographic KeyPair for signing reports
+    private static KeyPair signingKeyPair;
+    static {
+        try {
+            KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
+            kpg.initialize(2048);
+            signingKeyPair = kpg.generateKeyPair();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
     public AnalysisController(JobStore jobStore, SootUpAnalysisService analysisService) {
         this.jobStore = jobStore;
@@ -355,6 +369,13 @@ public class AnalysisController {
 
         if ("html".equalsIgnoreCase(format)) {
             String html = generateHtmlReport(job, targetName);
+            String signature = signData(html.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String pubKey = Base64.getEncoder().encodeToString(signingKeyPair.getPublic().getEncoded());
+            
+            // Embed signature at the end of the HTML file
+            html += "\n<!-- VerificationSignature: " + signature + " -->";
+            html += "\n<!-- VerificationPublicKey: " + pubKey + " -->";
+
             return ResponseEntity.ok()
                     .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filenameBase + ".html\"")
                     .contentType(org.springframework.http.MediaType.TEXT_HTML)
@@ -382,6 +403,13 @@ public class AnalysisController {
 
             try {
                 com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                String innerJson = mapper.writeValueAsString(export);
+                String signature = signData(innerJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                String pubKey = Base64.getEncoder().encodeToString(signingKeyPair.getPublic().getEncoded());
+
+                export.put("signature", signature);
+                export.put("publicKey", pubKey);
+
                 String prettyJson = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(export);
                 return ResponseEntity.ok()
                         .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filenameBase + ".json\"")
@@ -390,6 +418,86 @@ public class AnalysisController {
             } catch (Exception e) {
                 return ResponseEntity.internalServerError().body(Map.of("error", "Internal Error", "message", "JSON formatting failed"));
             }
+        }
+    }
+
+    // FR-N: Report Verification Endpoint
+    @PostMapping("/verify")
+    public ResponseEntity<?> verifyReport(@RequestBody Map<String, String> body) {
+        String content = body.getOrDefault("content", "").trim();
+        if (content.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Empty content"));
+
+        boolean verified = false;
+        String type = "unknown";
+        String extractedJobId = "unknown";
+
+        try {
+            if (content.startsWith("{")) {
+                type = "json";
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                @SuppressWarnings("unchecked")
+                Map<String, Object> map = mapper.readValue(content, Map.class);
+                String sig = String.valueOf(map.remove("signature"));
+                String pubKeyStr = String.valueOf(map.remove("publicKey"));
+                extractedJobId = String.valueOf(map.getOrDefault("jobId", "unknown"));
+
+                String innerJson = mapper.writeValueAsString(map);
+                verified = verifyData(innerJson.getBytes(java.nio.charset.StandardCharsets.UTF_8), sig, pubKeyStr);
+            } else if (content.contains("<!DOCTYPE html>")) {
+                type = "html";
+                java.util.regex.Matcher sigMatcher = java.util.regex.Pattern.compile("<!-- VerificationSignature: ([A-Za-z0-9+/=]+) -->").matcher(content);
+                java.util.regex.Matcher keyMatcher = java.util.regex.Pattern.compile("<!-- VerificationPublicKey: ([A-Za-z0-9+/=]+) -->").matcher(content);
+
+                if (sigMatcher.find() && keyMatcher.find()) {
+                    String sig = sigMatcher.group(1);
+                    String pubKeyStr = keyMatcher.group(1);
+                    
+                    // Strip the comments to get original verified raw HTML content
+                    String cleanContent = content
+                        .replaceAll("<!-- VerificationSignature: [A-Za-z0-9+/=]+ -->", "")
+                        .replaceAll("<!-- VerificationPublicKey: [A-Za-z0-9+/=]+ -->", "")
+                        .trim();
+
+                    verified = verifyData(cleanContent.getBytes(java.nio.charset.StandardCharsets.UTF_8), sig, pubKeyStr);
+                }
+            }
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of("verified", false, "error", "Parsing failed: " + e.getMessage()));
+        }
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("verified", verified);
+        res.put("type", type);
+        res.put("jobId", extractedJobId);
+        res.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.ok(res);
+    }
+
+    private static String signData(byte[] data) {
+        try {
+            Signature sig = Signature.getInstance("SHA256withRSA");
+            sig.initSign(signingKeyPair.getPrivate());
+            sig.update(data);
+            return Base64.getEncoder().encodeToString(sig.sign());
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static boolean verifyData(byte[] data, String signatureStr, String pubKeyStr) {
+        try {
+            byte[] sigBytes = Base64.getDecoder().decode(signatureStr);
+            byte[] keyBytes = Base64.getDecoder().decode(pubKeyStr);
+            X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
+            KeyFactory kf = KeyFactory.getInstance("RSA");
+            PublicKey pubKey = kf.generatePublic(spec);
+
+            Signature sig = Signature.getInstance("SHA256withRSA");
+            sig.initVerify(pubKey);
+            sig.update(data);
+            return sig.verify(sigBytes);
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -504,6 +612,20 @@ public class AnalysisController {
                     zos.closeEntry();
                 }
             }
+
+            // FR-N: Sign ZIP contents
+            byte[] reportHtmlBytes = generateHtmlReport(job, targetName).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            String sig = signData(reportHtmlBytes);
+            String pubKey = Base64.getEncoder().encodeToString(signingKeyPair.getPublic().getEncoded());
+
+            zos.putNextEntry(new java.util.zip.ZipEntry("verify.sig"));
+            zos.write(sig.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            zos.closeEntry();
+
+            zos.putNextEntry(new java.util.zip.ZipEntry("verify.pub"));
+            zos.write(pubKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            zos.closeEntry();
+
         } catch (Exception e) {
             log.error("Failed to generate zip archive: {}", e.getMessage());
         }
